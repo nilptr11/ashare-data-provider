@@ -1,10 +1,114 @@
 {
+  "anns_d": [
+    {
+      "scope": "runtime-permission",
+      "status": "open",
+      "summary": "当前账号未获公告下载接口授权",
+      "detail": "2026-05-31 smoke 实测返回 not authorized for premium api 'anns_d'。这类错误需要 Tushare 账号侧开通权限，不能通过本地参数修复。"
+    }
+  ],
+  "bo_cinema": [
+    {
+      "scope": "runtime-api-name",
+      "status": "open",
+      "summary": "Tushare 运行时返回接口名不正确",
+      "detail": "2026-05-31 smoke 中，部分票房/TMT 文档索引接口会返回“请指定正确的接口名”。需要后续核对 Tushare 当前 SDK/代理是否仍支持该接口名。"
+    }
+  ],
+  "bo_daily": [
+    {
+      "scope": "runtime-api-name",
+      "status": "open",
+      "summary": "Tushare 运行时返回接口名不正确",
+      "detail": "2026-05-31 smoke 中，部分票房/TMT 文档索引接口会返回“请指定正确的接口名”。需要后续核对 Tushare 当前 SDK/代理是否仍支持该接口名。"
+    }
+  ],
+  "bo_monthly": [
+    {
+      "scope": "runtime-api-name",
+      "status": "open",
+      "summary": "Tushare 运行时返回接口名不正确",
+      "detail": "2026-05-31 smoke 中，部分票房/TMT 文档索引接口会返回“请指定正确的接口名”。需要后续核对 Tushare 当前 SDK/代理是否仍支持该接口名。"
+    }
+  ],
+  "bo_weekly": [
+    {
+      "scope": "runtime-api-name",
+      "status": "open",
+      "summary": "Tushare 运行时返回接口名不正确",
+      "detail": "2026-05-31 smoke 中，部分票房/TMT 文档索引接口会返回“请指定正确的接口名”。需要后续核对 Tushare 当前 SDK/代理是否仍支持该接口名。"
+    }
+  ],
+  "cctv_news": [
+    {
+      "scope": "runtime-permission",
+      "status": "open",
+      "summary": "当前账号未获新闻接口授权",
+      "detail": "2026-05-31 smoke 实测返回 not authorized for premium api 'cctv_news'。这类错误需要 Tushare 账号侧开通权限，不能通过本地参数修复。"
+    }
+  ],
   "cyq_chips": [
     {
       "scope": "proxy",
       "status": "open",
       "summary": "代理端可能未正确识别 ts_code 参数",
       "detail": "2026-05-29 实测通过 SDK 和原始 HTTP payload 均传入 ts_code 后，代理仍返回“必填参数, ts_code”。这更像代理端参数转发或校验问题，不应归因于本地 CLI 或积分权限。"
+    }
+  ],
+  "film_record": [
+    {
+      "scope": "runtime-api-name",
+      "status": "open",
+      "summary": "Tushare 运行时返回接口名不正确",
+      "detail": "2026-05-31 smoke 中，部分票房/TMT 文档索引接口会返回“请指定正确的接口名”。需要后续核对 Tushare 当前 SDK/代理是否仍支持该接口名。"
+    }
+  ],
+  "major_news": [
+    {
+      "scope": "runtime-permission",
+      "status": "open",
+      "summary": "当前账号未获新闻接口授权",
+      "detail": "2026-05-31 smoke 实测返回 not authorized for premium api 'major_news'。这类错误需要 Tushare 账号侧开通权限，不能通过本地参数修复。"
+    }
+  ],
+  "rt_idx_min": [
+    {
+      "scope": "runtime-permission",
+      "status": "open",
+      "summary": "当前账号未获指数实时分钟接口授权",
+      "detail": "2026-05-31 smoke 实测返回 not authorized for premium api 'rt_idx_min'。这类错误需要 Tushare 账号侧开通权限，不能通过本地参数修复。"
+    }
+  ],
+  "rt_k": [
+    {
+      "scope": "runtime-permission",
+      "status": "open",
+      "summary": "当前账号未获实时 K 线接口授权",
+      "detail": "2026-05-31 smoke 实测返回 not authorized for premium api 'rt_k'。这类错误需要 Tushare 账号侧开通权限，不能通过本地参数修复。"
+    }
+  ],
+  "stk_mins": [
+    {
+      "scope": "runtime-permission",
+      "status": "open",
+      "summary": "当前账号未获历史分钟线接口授权",
+      "detail": "2026-05-31 smoke 实测返回 not authorized for premium api 'stk_mins'。分钟线类接口通常需要单独权限，不能通过本地参数修复。"
+    }
+  ],
+  "tmt_twincome": [
+    {
+      "scope": "runtime-api-name",
+      "status": "open",
+      "summary": "Tushare 运行时返回接口名不正确",
+      "detail": "2026-05-31 smoke 中，部分票房/TMT 文档索引接口会返回“请指定正确的接口名”。需要后续核对 Tushare 当前 SDK/代理是否仍支持该接口名。"
+    }
+  ],
+  "tmt_twincomedetail": [
+    {
+      "scope": "runtime-api-name",
+      "status": "open",
+      "summary": "Tushare 运行时返回接口名不正确",
+      "detail": "2026-05-31 smoke 中，部分票房/TMT 文档索引接口会返回“请指定正确的接口名”。需要后续核对 Tushare 当前 SDK/代理是否仍支持该接口名。"
     }
   ]
 }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .config import load_config
+from .config import TushareConfig, load_config
 
 
 class TushareError(RuntimeError):
@@ -31,8 +31,9 @@ class TushareCaller:
         token: str | None = None,
         proxy_url: str | None = None,
         env_file: str = ".env",
+        config: TushareConfig | None = None,
     ) -> None:
-        self._config = load_config(token=token, proxy_url=proxy_url, env_file=env_file)
+        self._config = config or load_config(token=token, proxy_url=proxy_url, env_file=env_file)
 
     @property
     def token(self) -> str | None:

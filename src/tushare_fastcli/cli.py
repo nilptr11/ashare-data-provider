@@ -6,12 +6,16 @@ import sys
 from dataclasses import asdict
 from typing import Any
 
-from .client import TushareCaller
-from .config import load_config
 from .defaults import default_params
 from .issues import known_issues
 from .output import emit, limit_rows, render
 from .params import merge_params
+from .provider import (
+    TushareInterfaceSelectionError,
+    TusharePermissionError,
+    TushareProvider,
+    TushareUnknownInterfaceError,
+)
 from .registry import InterfaceEntry, load_registry
 
 
@@ -38,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     defaults_parser = subparsers.add_parser("defaults", help="查看接口默认测试参数")
     defaults_parser.add_argument("api_name")
+    defaults_parser.add_argument("--doc-id", help="同名接口较多时，用 doc_id 精确定位")
+    defaults_parser.add_argument("--key", help="同名接口较多时，用 api:doc_id key 精确定位")
 
     info_parser = subparsers.add_parser("info", help="查看接口元数据和文档链接")
     info_parser.add_argument("api_name")
@@ -50,6 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
     call_parser.add_argument("--params", help="JSON object 参数")
     call_parser.add_argument("--params-file", help="从 JSON 文件读取参数")
     call_parser.add_argument("--fields", help="逗号分隔的输出字段")
+    call_parser.add_argument("--doc-id", help="同名接口较多时，用 doc_id 精确定位权限元数据")
+    call_parser.add_argument("--key", help="同名接口较多时，用 api:doc_id key 精确定位权限元数据")
     call_parser.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN")
     call_parser.add_argument("--proxy-url", help="Tushare API 代理地址；默认读取 TUSHARE_PROXY_URL")
     call_parser.add_argument("--env-file", default=".env", help="配置文件路径，默认读取当前目录 .env")
@@ -158,42 +166,28 @@ def _handle_info(args: argparse.Namespace) -> int:
 
 
 def _handle_call(args: argparse.Namespace) -> int:
-    registry = load_registry()
-    if not args.allow_unknown and not registry.exists(args.api_name):
-        print(f"未找到接口：{args.api_name}。如需强制调用，请加 --allow-unknown。", file=sys.stderr)
-        return 2
-
-    entries = registry.find(args.api_name)
-    config = load_config(
-        token=args.token,
-        proxy_url=args.proxy_url,
-        points=args.current_points,
-        env_file=args.env_file,
-    )
-    if entries and not args.force:
-        blocked = [
-            entry
-            for entry in entries
-            if (entry.eligibility == "needs_separate_permission" and not config.allow_separate_permission)
-            or (
-                entry.required_points is not None
-                and entry.required_points > config.points
-            )
-        ]
-        if blocked:
-            entry = blocked[0]
-            detail = entry.eligibility
-            if entry.required_points is not None:
-                detail = f"{detail}, required_points={entry.required_points}, current_points={config.points}"
-            print(f"接口可能不可用：{entry.api_name}:{entry.doc_id} ({detail})。如需强制调用，请加 --force。", file=sys.stderr)
-            return 2
-
     try:
         params = merge_params(args.params, args.params_file, args.param)
-        caller = TushareCaller(token=args.token, proxy_url=args.proxy_url, env_file=args.env_file)
-        result = caller.call(args.api_name, params=params, fields=args.fields)
+        provider = TushareProvider(
+            token=args.token,
+            proxy_url=args.proxy_url,
+            env_file=args.env_file,
+            points=args.current_points,
+        )
+        result = provider.call(
+            args.api_name,
+            params=params,
+            fields=args.fields,
+            doc_id=args.doc_id,
+            key=args.key,
+            force=args.force,
+            allow_unknown=args.allow_unknown,
+        )
         result = limit_rows(result, args.max_rows)
         emit(render(result, args.format), args.output)
+    except (TushareInterfaceSelectionError, TusharePermissionError, TushareUnknownInterfaceError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except Exception as exc:  # noqa: BLE001
         print(str(exc), file=sys.stderr)
         return 1
@@ -201,7 +195,7 @@ def _handle_call(args: argparse.Namespace) -> int:
 
 
 def _handle_defaults(args: argparse.Namespace) -> int:
-    print(json.dumps(default_params(args.api_name), ensure_ascii=False, indent=2))
+    print(json.dumps(default_params(args.api_name, doc_id=args.doc_id, key=args.key), ensure_ascii=False, indent=2))
     return 0
 
 

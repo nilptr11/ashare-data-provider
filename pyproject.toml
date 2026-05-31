@@ -7,7 +7,7 @@ name = "tushare-fastcli"
 version = "0.1.0"
 description = "Index-driven Tushare CLI for LLM and quant workflows."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.14"
 authors = [
   { name = "Codex" }
 ]
@@ -24,4 +24,4 @@ tsfc = "tushare_fastcli.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-tushare_fastcli = ["interfaces.json", "api_defaults.json", "known_issues.json"]
+tushare_fastcli = ["interfaces.json", "api_defaults.json", "known_issues.json", "recipes.json"]

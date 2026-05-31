@@ -20,6 +20,13 @@ class RegistryTest(unittest.TestCase):
         registry = InterfaceRegistry.from_dicts(interfaces)
         self.assertEqual(len(registry.find("rt_min")), 2)
 
+    def test_registry_can_filter_duplicate_api_names_by_doc_id_or_key(self) -> None:
+        interfaces = parse_markdown(ROOT / "references" / "data-interfaces.md")
+        registry = InterfaceRegistry.from_dicts(interfaces)
+
+        self.assertEqual([entry.doc_id for entry in registry.find("rt_min", doc_id="416")], ["416"])
+        self.assertEqual([entry.key for entry in registry.find("rt_min", key="rt_min:374")], ["rt_min:374"])
+
     def test_registry_filters_by_eligibility(self) -> None:
         registry = InterfaceRegistry.from_dicts(
             [

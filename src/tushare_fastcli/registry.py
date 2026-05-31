@@ -48,8 +48,18 @@ class InterfaceRegistry:
         categories = {part for entry in self._entries for part in entry.category_parts}
         return sorted(categories)
 
-    def find(self, api_name: str) -> list[InterfaceEntry]:
-        return list(self._by_name.get(api_name, []))
+    def find(
+        self,
+        api_name: str,
+        doc_id: str | None = None,
+        key: str | None = None,
+    ) -> list[InterfaceEntry]:
+        entries = list(self._by_name.get(api_name, []))
+        if doc_id is not None:
+            entries = [entry for entry in entries if entry.doc_id == doc_id]
+        if key is not None:
+            entries = [entry for entry in entries if entry.key == key]
+        return entries
 
     def exists(self, api_name: str) -> bool:
         return api_name in self._by_name

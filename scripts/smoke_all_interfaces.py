@@ -22,8 +22,12 @@ from tushare_fastcli.issues import known_issues  # noqa: E402
 from tushare_fastcli.registry import InterfaceEntry, load_registry  # noqa: E402
 
 
-def default_params(api_name: str) -> dict[str, Any]:
-    return configured_default_params(api_name) or {"limit": 1}
+def default_params(
+    api_name: str,
+    doc_id: str | None = None,
+    key: str | None = None,
+) -> dict[str, Any]:
+    return configured_default_params(api_name, doc_id=doc_id, key=key) or {"limit": 1}
 
 
 def dataframe_shape(value: Any) -> tuple[int | None, list[str]]:
@@ -63,7 +67,7 @@ def _base_result(entry: InterfaceEntry, params: dict[str, Any], elapsed_ms: int)
 
 def _call_entry_worker(entry_data: dict[str, str], env_file: str, proxy_url: str | None, queue: Queue) -> None:
     entry = InterfaceEntry(**entry_data)
-    params = default_params(entry.api_name)
+    params = default_params(entry.api_name, doc_id=entry.doc_id, key=entry.key)
     started = time.perf_counter()
     result_row = _base_result(entry, params, elapsed_ms=0)
 
@@ -98,7 +102,7 @@ def run_entry(
     proxy_url: str | None,
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    params = default_params(entry.api_name)
+    params = default_params(entry.api_name, doc_id=entry.doc_id, key=entry.key)
     started = time.perf_counter()
     queue: Queue = Queue(maxsize=1)
     process = Process(
@@ -197,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", default=20, type=int, help="单个接口超时时间，单位秒")
     parser.add_argument("--delay", default=0.6, type=float, help="接口之间的等待时间，单位秒")
     parser.add_argument("--limit", default=0, type=int, help="最多测试多少条索引记录，0 表示全部")
+    parser.add_argument("--key", action="append", default=[], help="只测试指定 api:doc_id，可重复传入")
     parser.add_argument("--unique-api", action="store_true", help="同名接口只测试第一条")
     parser.add_argument("--include-restricted", action="store_true", help="包含积分不足或需单独权限的接口")
     return parser
@@ -208,6 +213,7 @@ def selected_entries(
     include_restricted: bool,
     current_points: int,
     allow_separate_permission: bool,
+    keys: list[str] | None = None,
 ) -> list[InterfaceEntry]:
     entries = load_registry().entries
     if not include_restricted:
@@ -226,6 +232,9 @@ def selected_entries(
             seen.add(entry.api_name)
             unique_entries.append(entry)
         entries = unique_entries
+    if keys:
+        by_key = {entry.key: entry for entry in entries}
+        entries = [by_key[key] for key in keys if key in by_key]
     if limit > 0:
         return entries[:limit]
     return entries
@@ -244,7 +253,20 @@ def main() -> int:
         args.include_restricted,
         current_points=config.points,
         allow_separate_permission=config.allow_separate_permission,
+        keys=args.key,
     )
+    if args.key:
+        selected_keys = {entry.key for entry in entries}
+        missing_keys = [key for key in args.key if key not in selected_keys]
+        if missing_keys:
+            print(
+                "未找到或被权限过滤的接口 key："
+                + ", ".join(missing_keys)
+                + "。如需包含受限接口，请加 --include-restricted。",
+                file=sys.stderr,
+            )
+            return 2
+
     results: list[dict[str, Any]] = []
     total = len(entries)
 

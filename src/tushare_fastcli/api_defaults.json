@@ -1,32 +1,236 @@
 {
-  "daily": {
-    "trade_date": "20260423"
-  },
-  "daily_basic": {
-    "trade_date": "20260423"
-  },
   "adj_factor": {
     "trade_date": "20260423"
   },
-  "cyq_perf": {
+  "balancesheet": {
+    "ts_code": "000001.SZ",
+    "start_date": "20240101",
+    "end_date": "20260101"
+  },
+  "broker_recommend": {
+    "month": "202604"
+  },
+  "cashflow": {
+    "ts_code": "000001.SZ",
+    "start_date": "20240101",
+    "end_date": "20260101"
+  },
+  "cb_factor_pro": {
+    "trade_date": "20260423"
+  },
+  "ccass_hold_detail": {
+    "ts_code": "00700.HK",
     "trade_date": "20260423"
   },
   "cyq_chips": {
     "ts_code": "600000.SH",
     "trade_date": "20220429"
   },
-  "us_fina_indicator": {
-    "ts_code": "NVDA",
-    "period": "20241231"
+  "cyq_perf": {
+    "trade_date": "20260423"
+  },
+  "daily": {
+    "trade_date": "20260423"
+  },
+  "daily_basic": {
+    "trade_date": "20260423"
+  },
+  "dc_member": {
+    "ts_code": "BK0428.DC",
+    "trade_date": "20260423"
+  },
+  "dividend": {
+    "ts_code": "000001.SZ"
+  },
+  "fina_audit": {
+    "ts_code": "000001.SZ",
+    "start_date": "20240101",
+    "end_date": "20260101"
+  },
+  "fina_indicator": {
+    "ts_code": "000001.SZ",
+    "start_date": "20240101",
+    "end_date": "20260101"
+  },
+  "fina_mainbz": {
+    "ts_code": "000001.SZ",
+    "start_date": "20240101",
+    "end_date": "20260101"
+  },
+  "forecast": {
+    "ts_code": "000001.SZ"
+  },
+  "fund_daily": {
+    "ts_code": "510300.SH",
+    "start_date": "20260423",
+    "end_date": "20260423"
+  },
+  "fund_div": {
+    "ts_code": "510300.SH"
+  },
+  "fund_factor_pro": {
+    "ts_code": "510300.SH",
+    "start_date": "20260401",
+    "end_date": "20260430"
+  },
+  "fund_nav": {
+    "ts_code": "510300.SH"
+  },
+  "fund_portfolio": {
+    "ts_code": "510300.SH",
+    "period": "20250331"
+  },
+  "fut_holding": {
+    "trade_date": "20260423"
+  },
+  "fut_settle": {
+    "trade_date": "20260423"
+  },
+  "fut_weekly_monthly": {
+    "ts_code": "RB.SHF",
+    "freq": "week",
+    "start_date": "20260401",
+    "end_date": "20260430"
+  },
+  "fut_wsr": {
+    "trade_date": "20260423"
+  },
+  "ggt_top10": {
+    "trade_date": "20260423"
+  },
+  "hk_mins": {
+    "ts_code": "00700.HK",
+    "freq": "1min",
+    "trade_date": "20260423"
+  },
+  "idx_factor_pro": {
+    "trade_date": "20260423"
+  },
+  "income": {
+    "ts_code": "000001.SZ",
+    "start_date": "20240101",
+    "end_date": "20260101"
+  },
+  "index_daily": {
+    "ts_code": "000001.SH",
+    "trade_date": "20260423"
+  },
+  "index_dailybasic": {
+    "trade_date": "20260423"
+  },
+  "index_monthly": {
+    "ts_code": "000001.SH",
+    "start_date": "20240101",
+    "end_date": "20260430"
+  },
+  "index_weekly": {
+    "ts_code": "000001.SH",
+    "start_date": "20260401",
+    "end_date": "20260430"
+  },
+  "index_weight": {
+    "index_code": "000300.SH",
+    "trade_date": "20260430"
+  },
+  "moneyflow": {
+    "trade_date": "20260423"
+  },
+  "moneyflow_hsgt": {
+    "trade_date": "20260423"
+  },
+  "monthly": {
+    "ts_code": "000001.SZ",
+    "start_date": "20240101",
+    "end_date": "20260430"
+  },
+  "opt_mins": {
+    "ts_code": "10000001.SH",
+    "freq": "1min",
+    "trade_date": "20260423"
+  },
+  "pro_bar": {
+    "ts_code": "000001.SZ",
+    "start_date": "20260423",
+    "end_date": "20260423"
+  },
+  "rt_idx_k": {
+    "ts_code": "000001.SH"
+  },
+  "rt_etf_k": {
+    "ts_code": "510300.SH"
+  },
+  "rt_min": {
+    "ts_code": "000001.SZ",
+    "freq": "1MIN"
+  },
+  "rt_min:374": {
+    "ts_code": "000001.SZ",
+    "freq": "1MIN"
+  },
+  "rt_min:416": {
+    "ts_code": "510300.SH",
+    "freq": "1MIN"
+  },
+  "stk_factor_pro": {
+    "trade_date": "20260423"
+  },
+  "stk_nineturn": {
+    "trade_date": "20260423"
+  },
+  "stk_premarket": {
+    "trade_date": "20260529"
+  },
+  "stk_rewards": {
+    "ts_code": "000001.SZ"
+  },
+  "stk_week_month_adj": {
+    "ts_code": "000001.SZ",
+    "freq": "week",
+    "start_date": "20260401",
+    "end_date": "20260430"
+  },
+  "stk_weekly_monthly": {
+    "ts_code": "000001.SZ",
+    "freq": "week",
+    "start_date": "20260401",
+    "end_date": "20260430"
+  },
+  "top_inst": {
+    "trade_date": "20260423"
+  },
+  "top10_floatholders": {
+    "ts_code": "000001.SZ",
+    "period": "20250331"
+  },
+  "top10_holders": {
+    "ts_code": "000001.SZ",
+    "period": "20250331"
+  },
+  "top_list": {
+    "trade_date": "20260423"
   },
   "us_balancesheet": {
     "ts_code": "NVDA",
     "start_date": "20240101",
     "end_date": "20260101"
   },
-  "pro_bar": {
+  "us_cashflow": {
+    "ts_code": "NVDA",
+    "start_date": "20240101",
+    "end_date": "20260101"
+  },
+  "us_fina_indicator": {
+    "ts_code": "NVDA",
+    "period": "20241231"
+  },
+  "us_income": {
+    "ts_code": "NVDA",
+    "start_date": "20240101",
+    "end_date": "20260101"
+  },
+  "weekly": {
     "ts_code": "000001.SZ",
-    "start_date": "20260423",
-    "end_date": "20260423"
+    "start_date": "20260401",
+    "end_date": "20260430"
   }
 }
