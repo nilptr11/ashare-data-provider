@@ -100,7 +100,20 @@ tsfc call stock_basic \
   --output stock_basic.csv
 ```
 
-当账号没有 `news` 接口单独权限时，可以抓取登录后可见的 Tushare 资讯页作为当前快讯替代源。输出默认是扁平 records，字段包含 `id/content_hash/dedupe_key/src/source_name/channel/time/datetime/title/content/body/fetched_at/source_kind`，便于 JSONL 或 CSV 入库：
+### A 股事件能力
+
+当前高层事件能力明确为三类：A 股公告、业绩预告、时讯。公告和业绩预告走 AKShare；Tushare `forecast` 与 `news` API 暂时不作为高层能力使用。时讯继续抓取登录后可见的 Tushare 资讯页，作为当前快讯替代源。
+
+```bash
+tsfc events notice --days 3 --max-rows 20 --format table
+tsfc events notice --stock 000001 --category 财务报告 --keyword 分红 --format jsonl
+tsfc events forecast --days 60 --period 20260331 --max-rows 20 --format csv
+tsfc events news --source sina --source cls --format jsonl --output tushare-news.jsonl
+```
+
+公告标准 records 字段包含 `id/content_hash/dedupe_key/event_type/source_kind/stock_code/stock_name/title/notice_type/publish_date/url/fetched_at/raw`。业绩预告标准 records 字段包含 `id/content_hash/dedupe_key/event_type/source_kind/period/stock_code/stock_name/metric/forecast_type/change_range/publish_date/change_summary/change_reason/fetched_at/raw`。
+
+`events news` 输出沿用时讯 records：`id/content_hash/dedupe_key/src/source_name/channel/time/datetime/title/content/body/fetched_at/source_kind`，便于 JSONL 或 CSV 入库。兼容入口 `tsfc news` 仍可使用：
 
 ```bash
 tsfc news --source sina --source cls --format jsonl --output tushare-news.jsonl

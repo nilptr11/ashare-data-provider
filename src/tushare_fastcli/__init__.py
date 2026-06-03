@@ -1,6 +1,15 @@
 """Tushare 快速调用工具。"""
 
 from .client import TushareCallError, TushareCaller, TushareError
+from .events import (
+    AStockEventDependencyError,
+    AStockEventError,
+    AStockEventFetchError,
+    NOTICE_CATEGORIES,
+    auto_periods,
+    fetch_forecast,
+    fetch_notice,
+)
 from .news import (
     DEFAULT_NEWS_SOURCES,
     TushareNewsError,
@@ -34,7 +43,11 @@ __all__ = [
     "ApiParameter",
     "ApiSchema",
     "ApiRecipe",
+    "AStockEventDependencyError",
+    "AStockEventError",
+    "AStockEventFetchError",
     "DEFAULT_NEWS_SOURCES",
+    "NOTICE_CATEGORIES",
     "InterfaceEntry",
     "InterfaceRegistry",
     "RecipeError",
@@ -50,10 +63,13 @@ __all__ = [
     "TushareProvider",
     "TushareProviderError",
     "TushareUnknownInterfaceError",
+    "auto_periods",
     "build_news_records",
     "crawl_tushare_news",
     "default_fields",
     "default_recipe_params",
+    "fetch_forecast",
+    "fetch_notice",
     "get_api_schema",
     "get_recipe",
     "load_tushare_cookie",

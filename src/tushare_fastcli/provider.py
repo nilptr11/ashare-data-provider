@@ -349,6 +349,90 @@ class TushareProvider:
             force=force,
         )
 
+    def a_stock_notice(
+        self,
+        days: int = 7,
+        end_date: str | date | datetime | None = None,
+        stock: str | None = None,
+        category: str = "全部",
+        keyword: str | None = None,
+        timeout: int = 30,
+        verbose_source: bool = False,
+        max_rows: int = 0,
+        as_records: bool = True,
+    ) -> Any:
+        from .events import fetch_notice
+
+        result = fetch_notice(
+            days=days,
+            end_date=end_date,
+            stock=stock,
+            category=category,
+            keyword=keyword,
+            timeout=timeout,
+            verbose_source=verbose_source,
+            as_records=as_records,
+        )
+        if max_rows > 0:
+            return result[:max_rows] if isinstance(result, list) else result.head(max_rows)
+        return result
+
+    def earnings_forecast(
+        self,
+        days: int = 60,
+        end_date: str | date | datetime | None = None,
+        stock: str | None = None,
+        periods: list[str] | tuple[str, ...] | None = None,
+        scan_periods: int = 5,
+        keyword: str | None = None,
+        timeout: int = 30,
+        verbose_source: bool = False,
+        max_rows: int = 0,
+        as_records: bool = True,
+    ) -> Any:
+        from .events import fetch_forecast
+
+        result = fetch_forecast(
+            days=days,
+            end_date=end_date,
+            stock=stock,
+            periods=periods,
+            scan_periods=scan_periods,
+            keyword=keyword,
+            timeout=timeout,
+            verbose_source=verbose_source,
+            as_records=as_records,
+        )
+        if max_rows > 0:
+            return result[:max_rows] if isinstance(result, list) else result.head(max_rows)
+        return result
+
+    def event_news(
+        self,
+        sources: list[str] | tuple[str, ...] | None = None,
+        cookie: str | None = None,
+        cookie_file: str | None = None,
+        cookie_env: str = "TUSHARE_COOKIE",
+        timeout: float = 30.0,
+        delay: float = 0.3,
+        retries: int = 2,
+        publish_date: str | None = None,
+        max_rows: int = 0,
+        include_summary: bool = False,
+    ) -> Any:
+        return self.news_fallback(
+            sources=sources,
+            cookie=cookie,
+            cookie_file=cookie_file,
+            cookie_env=cookie_env,
+            timeout=timeout,
+            delay=delay,
+            retries=retries,
+            publish_date=publish_date,
+            max_rows=max_rows,
+            include_summary=include_summary,
+        )
+
     def news_fallback(
         self,
         sources: list[str] | tuple[str, ...] | None = None,

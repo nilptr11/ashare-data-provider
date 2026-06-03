@@ -240,6 +240,54 @@ class ProviderTest(unittest.TestCase):
         self.assertEqual(caller.calls[1]["api_name"], "daily")
         self.assertEqual(caller.calls[1]["params"], {"trade_date": "20260529"})
 
+    def test_a_stock_notice_uses_akshare_event_layer(self) -> None:
+        provider = make_provider(make_registry({"api_name": "daily"}))
+
+        with patch("tushare_fastcli.events.fetch_notice", return_value=[{"event_type": "notice"}, {"event_type": "notice"}]) as fetch:
+            records = provider.a_stock_notice(days=3, end_date="20260603", stock="000001", category="财务报告", keyword="分红", max_rows=1)
+
+        fetch.assert_called_once_with(
+            days=3,
+            end_date="20260603",
+            stock="000001",
+            category="财务报告",
+            keyword="分红",
+            timeout=30,
+            verbose_source=False,
+            as_records=True,
+        )
+        self.assertEqual(records, [{"event_type": "notice"}])
+
+    def test_earnings_forecast_uses_akshare_event_layer(self) -> None:
+        provider = make_provider(make_registry({"api_name": "forecast"}))
+        caller = provider._caller
+
+        with patch("tushare_fastcli.events.fetch_forecast", return_value=[{"event_type": "forecast"}]) as fetch:
+            records = provider.earnings_forecast(days=60, periods=["20260331"], stock="000001")
+
+        fetch.assert_called_once_with(
+            days=60,
+            end_date=None,
+            stock="000001",
+            periods=["20260331"],
+            scan_periods=5,
+            keyword=None,
+            timeout=30,
+            verbose_source=False,
+            as_records=True,
+        )
+        self.assertEqual(records, [{"event_type": "forecast"}])
+        self.assertEqual(caller.calls, [])
+
+    def test_event_news_delegates_to_page_crawler(self) -> None:
+        provider = make_provider(make_registry({"api_name": "news"}))
+
+        with patch.object(provider, "news_fallback", return_value=[{"event_type": "news"}]) as fallback:
+            records = provider.event_news(sources=["cls"], max_rows=1)
+
+        fallback.assert_called_once()
+        self.assertEqual(records, [{"event_type": "news"}])
+
     def test_news_fallback_delegates_to_page_crawler(self) -> None:
         provider = make_provider(make_registry({"api_name": "news"}))
         payload = {

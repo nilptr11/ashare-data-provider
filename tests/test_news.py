@@ -96,6 +96,21 @@ class NewsTest(unittest.TestCase):
         self.assertEqual(csv_text.splitlines()[0], "src,content")
         self.assertIn("sina,a", csv_text)
 
+    def test_record_table_render_supports_flattened_records(self) -> None:
+        table = render([{"src": "sina", "content": "a"}, {"src": "cls", "content": "b"}], "table")
+
+        self.assertIn("src", table.splitlines()[0])
+        self.assertIn("content", table.splitlines()[0])
+        self.assertIn("sina", table)
+        self.assertIn("cls", table)
+
+    def test_record_table_render_shortens_nested_raw(self) -> None:
+        table = render([{"event_type": "notice", "raw": {"公告标题": "很长的公告"}}], "table")
+
+        self.assertIn("event_type", table)
+        self.assertIn("raw", table)
+        self.assertIn("公告标题", table)
+
     def test_parse_news_page_rejects_login_shell(self) -> None:
         with self.assertRaisesRegex(TushareNewsParseError, "登录页或前端壳页"):
             parse_news_page('<a href="/weborder/#/login">login</a>', "sina")
