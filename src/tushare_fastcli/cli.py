@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from .defaults import default_params
@@ -14,7 +15,10 @@ from .news import (
     TushareNewsError,
     crawl_tushare_news,
     load_tushare_cookie,
+    merge_news_files,
+    merge_news_records,
     normalize_news_sources,
+    read_news_records,
 )
 from .output import emit, limit_rows, render
 from .params import merge_params
@@ -93,9 +97,13 @@ def build_parser() -> argparse.ArgumentParser:
         news_parser.add_argument("--timeout", type=float, default=30.0, help="单来源请求超时时间，秒")
         news_parser.add_argument("--delay", type=float, default=0.3, help="来源之间的间隔，秒")
         news_parser.add_argument("--retries", type=int, default=2, help="单来源失败重试次数，默认 2")
-        news_parser.add_argument("--publish-date", help="可选：用 YYYY-MM-DD 补齐 records.datetime")
+        news_parser.add_argument("--publish-date", help="可选：覆盖自动 anchor date，支持 YYYY-MM-DD 或 YYYYMMDD")
+        news_parser.add_argument("--anchor-date", help="可选：指定自动补全日期的抓取锚点，默认当前日期")
         news_parser.add_argument("--max-rows", type=int, default=0, help="只输出前 N 条记录，0 表示不限制")
         news_parser.add_argument("--include-summary", action="store_true", help="输出包含来源统计和 records 的 JSON 对象")
+        news_parser.add_argument("--snapshot-output", help="额外保存本次抓取快照文件，格式由扩展名推断：.json/.jsonl/.csv")
+        news_parser.add_argument("--merge-input", action="append", default=[], help="合并去重输入文件，可重复传入")
+        news_parser.add_argument("--merge-output", help="抓取后将 --merge-input 与本次 records 去重合并写入该文件")
         news_parser.add_argument("--format", choices=OUTPUT_FORMATS, default="json")
         news_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
@@ -134,6 +142,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     event_news_parser = event_subparsers.add_parser("news", help="抓取 Tushare 资讯页面时讯，不使用 Tushare news API")
     add_news_arguments(event_news_parser)
+
+    merge_news_parser = event_subparsers.add_parser("news-merge", help="合并多个时讯 records 文件并按 dedupe_key 去重")
+    merge_news_parser.add_argument("--input", action="append", required=True, help="输入 JSON/JSONL/CSV 文件，可重复传入")
+    merge_news_parser.add_argument("--format", choices=OUTPUT_FORMATS, default="jsonl")
+    merge_news_parser.add_argument("--output", required=True, help="输出文件路径")
+    merge_news_parser.add_argument("--max-rows", type=int, default=0, help="只输出前 N 条记录，0 表示不限制")
 
     return parser
 
@@ -261,6 +275,21 @@ def _handle_call(args: argparse.Namespace) -> int:
     return 0
 
 
+def _format_from_path(path: str | Path) -> str:
+    suffix = Path(path).suffix.lower()
+    if suffix == ".jsonl":
+        return "jsonl"
+    if suffix == ".csv":
+        return "csv"
+    if suffix == ".json":
+        return "json"
+    return "jsonl"
+
+
+def _emit_records_by_path(records: list[dict[str, Any]], output: str | Path) -> None:
+    emit(render(records, _format_from_path(output)), output)
+
+
 def _handle_news(args: argparse.Namespace) -> int:
     try:
         if args.include_summary and args.format != "json":
@@ -280,8 +309,18 @@ def _handle_news(args: argparse.Namespace) -> int:
             delay=args.delay,
             retries=args.retries,
             publish_date=args.publish_date,
+            anchor_date=args.anchor_date,
         )
         records = limit_rows(payload["records"], args.max_rows)
+        if args.snapshot_output:
+            _emit_records_by_path(records, args.snapshot_output)
+        if args.merge_output:
+            input_groups = [read_news_records(path) for path in args.merge_input]
+            merged_records = limit_rows(
+                merge_news_records([*input_groups, records], snapshot_files=[*args.merge_input, str(args.snapshot_output or "current-run")]),
+                args.max_rows,
+            )
+            _emit_records_by_path(merged_records, args.merge_output)
         if args.include_summary:
             payload = dict(payload)
             payload["records"] = records
@@ -300,6 +339,17 @@ def _handle_news(args: argparse.Namespace) -> int:
 def _handle_events(args: argparse.Namespace) -> int:
     if args.event_type == "news":
         return _handle_news(args)
+    if args.event_type == "news-merge":
+        try:
+            records = limit_rows(merge_news_files(args.input), args.max_rows)
+            emit(render(records, args.format), args.output)
+        except TushareNewsError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        except Exception as exc:  # noqa: BLE001
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
 
     try:
         provider = TushareProvider()

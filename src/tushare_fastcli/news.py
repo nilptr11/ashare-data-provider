@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import csv
+import json
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -47,8 +49,12 @@ def _normalize(value: str | None) -> str | None:
     return value or None
 
 
+def _now() -> datetime:
+    return datetime.now().astimezone().replace(microsecond=0)
+
+
 def _now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+    return _now().isoformat(timespec="seconds")
 
 
 def _text_of(node: Any) -> str:
@@ -149,8 +155,53 @@ def _make_soup(html: str) -> Any:
     return BeautifulSoup(html, "html.parser")
 
 
-def parse_news_page(html: str, slug: str) -> dict[str, Any]:
+def _parse_date(value: str | date | datetime | None) -> date:
+    if value is None:
+        return _now().date()
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return datetime.strptime(text, "%Y-%m-%d").date()
+        if re.fullmatch(r"\d{8}", text):
+            return datetime.strptime(text, "%Y%m%d").date()
+    except ValueError as exc:
+        raise TushareNewsError(f"日期必须是 YYYY-MM-DD 或 YYYYMMDD：{value}") from exc
+    raise TushareNewsError(f"日期必须是 YYYY-MM-DD 或 YYYYMMDD：{value}")
+
+
+def _parse_news_day_marker(text: str, anchor_date: date) -> date | None:
+    match = re.search(r"(\d{1,2})\s*月\s*(\d{1,2})\s*日", text)
+    if not match:
+        return None
+    month = int(match.group(1))
+    day = int(match.group(2))
+    try:
+        resolved = date(anchor_date.year, month, day)
+    except ValueError:
+        return None
+    if resolved > anchor_date:
+        resolved = date(anchor_date.year - 1, month, day)
+    return resolved
+
+
+def _combine_date_time(item_date: date | None, publish_time: str) -> str | None:
+    if item_date is None or not re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", publish_time):
+        return None
+    time_text = publish_time if publish_time.count(":") == 2 else f"{publish_time}:00"
+    return f"{item_date.isoformat()} {time_text}"
+
+
+def _has_class(node: Any, class_name: str) -> bool:
+    return class_name in (node.get("class") or [])
+
+
+def parse_news_page(html: str, slug: str, anchor_date: str | date | datetime | None = None) -> dict[str, Any]:
     soup = _make_soup(html)
+    resolved_anchor_date = _parse_date(anchor_date)
     meta: dict[str, str] = {}
     for item in soup.select("meta"):
         name = item.get("name") or item.get("property") or item.get("http-equiv")
@@ -191,18 +242,34 @@ def parse_news_page(html: str, slug: str) -> dict[str, Any]:
     for channel_name in channel_names:
         container = soup.find(id=f"news_{channel_name}")
         items = []
+        current_date = resolved_anchor_date
+        current_date_source = "anchor_date"
         if container:
-            for index, item in enumerate(container.select(".news_item"), start=1):
-                content = _text_of(item.select_one(".news_content"))
+            for child in container.children:
+                if not getattr(child, "get", None) or not _has_class(child, "news_item"):
+                    continue
+                if _has_class(child, "news_day"):
+                    marker_date = _parse_news_day_marker(_text_of(child), resolved_anchor_date)
+                    if marker_date is not None:
+                        current_date = marker_date
+                        current_date_source = "page_day_marker"
+                    continue
+
+                content = _text_of(child.select_one(".news_content"))
                 if not content:
-                    content = _text_of(item)
+                    content = _text_of(child)
                 if not content:
                     continue
+                publish_time = _text_of(child.select_one(".news_datetime"))
                 items.append(
                     {
-                        "time": _text_of(item.select_one(".news_datetime")),
+                        "date": current_date.isoformat(),
+                        "time": publish_time,
+                        "datetime": _combine_date_time(current_date, publish_time),
+                        "date_source": current_date_source,
+                        "date_confidence": "high" if current_date_source == "page_day_marker" else "medium",
                         "content": content,
-                        "position": index,
+                        "position": len(items) + 1,
                     }
                 )
         channels.append({"name": channel_name, "count": len(items), "items": items})
@@ -219,6 +286,7 @@ def parse_news_page(html: str, slug: str) -> dict[str, Any]:
         "navigation": navigation,
         "data_sources": data_sources,
         "current_source": current_source,
+        "anchor_date": resolved_anchor_date.isoformat(),
         "channels": channels,
         "total_items": sum(channel["count"] for channel in channels),
         "has_search": soup.select_one("#search-input") is not None and soup.select_one("#search-button") is not None,
@@ -264,15 +332,16 @@ def _content_hash(title: str, body: str, content: str) -> str:
     return _hash_parts(_normalize_hash_text(content))
 
 
-def _resolved_datetime(publish_date: str | None, publish_time: str) -> str | None:
+def _explicit_date_fields(publish_date: str | None, publish_time: str) -> tuple[str | None, str | None, str | None, str]:
     if publish_date is None:
-        return None
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", publish_date):
-        raise TushareNewsError("publish_date 必须是 YYYY-MM-DD 格式")
-    if not re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", publish_time):
-        return None
-    time_text = publish_time if publish_time.count(":") == 2 else f"{publish_time}:00"
-    return f"{publish_date} {time_text}"
+        return None, None, None, ""
+    explicit_date = _parse_date(publish_date)
+    return (
+        explicit_date.isoformat(),
+        _combine_date_time(explicit_date, publish_time),
+        "explicit_publish_date",
+        "high",
+    )
 
 
 def build_news_records(
@@ -290,17 +359,25 @@ def build_news_records(
                 title, body = _extract_title_body(content)
                 publish_time = str(item.get("time", "")).strip()
                 content_hash = _content_hash(title, body, content)
+                explicit_date, explicit_datetime, explicit_source, explicit_confidence = _explicit_date_fields(publish_date, publish_time)
+                item_date = explicit_date or item.get("date")
+                item_datetime = explicit_datetime or item.get("datetime")
+                date_source = explicit_source or item.get("date_source")
+                date_confidence = explicit_confidence or item.get("date_confidence")
                 record = {
-                    "id": _hash_parts(page["slug"], channel["name"], publish_time, content),
+                    "id": _hash_parts(page["slug"], channel["name"], item_datetime or publish_time, content),
                     "content_hash": content_hash,
-                    "dedupe_key": _hash_parts(page["slug"], channel["name"], publish_time, content_hash),
+                    "dedupe_key": _hash_parts("tushare_news_page", page["slug"], channel["name"], item_datetime or publish_time, content_hash),
                     "src": page["slug"],
                     "source": source_name,
                     "source_name": source_name,
                     "source_url": page["url"],
                     "channel": channel["name"],
+                    "date": item_date,
                     "time": publish_time,
-                    "datetime": _resolved_datetime(publish_date, publish_time),
+                    "datetime": item_datetime,
+                    "date_source": date_source,
+                    "date_confidence": date_confidence,
                     "title": title,
                     "content": content,
                     "body": body,
@@ -313,10 +390,97 @@ def build_news_records(
     return records
 
 
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    records = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            value = json.loads(line)
+            if isinstance(value, dict):
+                records.append(value)
+    return records
+
+
+def _read_csv(path: Path) -> list[dict[str, Any]]:
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def read_news_records(path: str | Path) -> list[dict[str, Any]]:
+    resolved = Path(path)
+    if resolved.suffix == ".jsonl":
+        return _read_jsonl(resolved)
+    if resolved.suffix == ".csv":
+        return _read_csv(resolved)
+    data = json.loads(resolved.read_text(encoding="utf-8"))
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict) and isinstance(data.get("records"), list):
+        return [item for item in data["records"] if isinstance(item, dict)]
+    raise TushareNewsError(f"无法从文件读取时讯 records：{resolved}")
+
+
+def _news_merge_key(record: dict[str, Any]) -> str:
+    return str(
+        record.get("dedupe_key")
+        or _hash_parts(
+            str(record.get("source_kind", "tushare_news_page")),
+            str(record.get("src", "")),
+            str(record.get("channel", "")),
+            str(record.get("datetime") or record.get("time") or ""),
+            str(record.get("content_hash") or record.get("content") or ""),
+        )
+    )
+
+
+def _sort_news_record(record: dict[str, Any]) -> tuple[str, str, int]:
+    return (
+        str(record.get("datetime") or record.get("date") or ""),
+        str(record.get("fetched_at") or ""),
+        -int(record.get("sequence") or 0),
+    )
+
+
+def merge_news_records(record_groups: list[list[dict[str, Any]]], snapshot_files: list[str] | None = None) -> list[dict[str, Any]]:
+    files = snapshot_files or []
+    merged: dict[str, dict[str, Any]] = {}
+    for group_index, records in enumerate(record_groups):
+        snapshot_file = files[group_index] if group_index < len(files) else None
+        for record in records:
+            key = _news_merge_key(record)
+            if key not in merged:
+                merged[key] = dict(record)
+                merged[key]["first_seen_at"] = record.get("fetched_at")
+                merged[key]["last_seen_at"] = record.get("fetched_at")
+                merged[key]["seen_count"] = 1
+                merged[key]["snapshot_files"] = [snapshot_file] if snapshot_file else []
+                continue
+
+            existing = merged[key]
+            fetched_at = record.get("fetched_at")
+            if fetched_at:
+                seen_times = [value for value in [existing.get("first_seen_at"), existing.get("last_seen_at"), fetched_at] if value]
+                existing["first_seen_at"] = min(seen_times)
+                existing["last_seen_at"] = max(seen_times)
+            existing["seen_count"] = int(existing.get("seen_count") or 1) + 1
+            if snapshot_file and snapshot_file not in existing.get("snapshot_files", []):
+                existing.setdefault("snapshot_files", []).append(snapshot_file)
+
+    return sorted(merged.values(), key=_sort_news_record, reverse=True)
+
+
+def merge_news_files(paths: list[str | Path]) -> list[dict[str, Any]]:
+    resolved_paths = [Path(path) for path in paths]
+    return merge_news_records(
+        [read_news_records(path) for path in resolved_paths],
+        snapshot_files=[str(path) for path in resolved_paths],
+    )
+
+
 def build_news_summary(pages: list[dict[str, Any]], fetched_at: str) -> dict[str, Any]:
     return {
         "base_url": f"{BASE_URL}/news",
         "fetched_at": fetched_at,
+        "anchor_dates": sorted({str(page.get("anchor_date", "")) for page in pages if page.get("anchor_date")}),
         "source_kind": "tushare_news_page",
         "sources": [
             {
@@ -338,12 +502,14 @@ def crawl_tushare_news(
     delay: float = 0.3,
     retries: int = 2,
     publish_date: str | None = None,
+    anchor_date: str | date | datetime | None = None,
 ) -> dict[str, Any]:
     resolved_sources = normalize_news_sources(sources)
     fetched_at = _now_iso()
+    resolved_anchor_date = publish_date or anchor_date or fetched_at[:10]
     pages = []
     for index, slug in enumerate(resolved_sources, start=1):
-        pages.append(parse_news_page(fetch_news_html(cookie, slug, timeout=timeout, retries=retries), slug))
+        pages.append(parse_news_page(fetch_news_html(cookie, slug, timeout=timeout, retries=retries), slug, anchor_date=resolved_anchor_date))
         if index < len(resolved_sources) and delay > 0:
             time.sleep(delay)
 

@@ -8,6 +8,7 @@ from tushare_fastcli.news import (
     TushareNewsError,
     TushareNewsParseError,
     build_news_records,
+    merge_news_records,
     load_tushare_cookie,
     normalize_news_sources,
     parse_news_page,
@@ -61,6 +62,25 @@ class NewsTest(unittest.TestCase):
         self.assertEqual(page["channels"][0]["items"][0]["content"], "【AI算力】产业链订单继续增长")
         self.assertTrue(page["has_search"])
 
+    def test_parse_news_page_uses_anchor_date_and_day_markers(self) -> None:
+        html = NEWS_HTML.replace(
+            '<div id="news_快讯">\n      <div class="news_item">',
+            '<div id="news_快讯">\n      <div class="news_item">',
+        ).replace(
+            '    </div>\n    <div id="news_7*24">',
+            '      <div class="news_day news_item">5月31日</div>\n      <div class="news_item"><span class="news_datetime">23:59</span><span class="news_content">昨日消息</span></div>\n    </div>\n    <div id="news_7*24">',
+        )
+
+        page = parse_news_page(html, "cls", anchor_date="2026-06-01")
+        records = build_news_records([page], fetched_at="2026-06-01T09:40:00+08:00")
+
+        self.assertEqual(records[0]["date"], "2026-06-01")
+        self.assertEqual(records[0]["datetime"], "2026-06-01 09:31:00")
+        self.assertEqual(records[0]["date_source"], "anchor_date")
+        self.assertEqual(records[1]["date"], "2026-05-31")
+        self.assertEqual(records[1]["datetime"], "2026-05-31 23:59:00")
+        self.assertEqual(records[1]["date_source"], "page_day_marker")
+
     def test_build_news_records_outputs_db_friendly_rows(self) -> None:
         page = parse_news_page(NEWS_HTML, "cls")
         records = build_news_records([page], fetched_at="2026-06-01T09:40:00+08:00", publish_date="2026-06-01")
@@ -68,7 +88,10 @@ class NewsTest(unittest.TestCase):
         self.assertEqual(records[0]["src"], "cls")
         self.assertEqual(records[0]["source_name"], "财联社")
         self.assertEqual(records[0]["channel"], "快讯")
+        self.assertEqual(records[0]["date"], "2026-06-01")
         self.assertEqual(records[0]["datetime"], "2026-06-01 09:31:00")
+        self.assertEqual(records[0]["date_source"], "explicit_publish_date")
+        self.assertEqual(records[0]["date_confidence"], "high")
         self.assertEqual(records[0]["title"], "AI算力")
         self.assertEqual(records[0]["body"], "产业链订单继续增长")
         self.assertEqual(len(records[0]["id"]), 64)
@@ -89,6 +112,31 @@ class NewsTest(unittest.TestCase):
 
         self.assertEqual(bracket_record["content_hash"], pipe_record["content_hash"])
         self.assertNotEqual(bracket_record["id"], pipe_record["id"])
+
+    def test_merge_news_records_dedupes_and_tracks_seen_metadata(self) -> None:
+        first = {
+            "dedupe_key": "k1",
+            "datetime": "2026-06-01 09:31:00",
+            "fetched_at": "2026-06-01T09:40:00+08:00",
+            "sequence": 1,
+            "content": "a",
+        }
+        second = dict(first, fetched_at="2026-06-02T09:40:00+08:00")
+        newer = {
+            "dedupe_key": "k2",
+            "datetime": "2026-06-02 09:31:00",
+            "fetched_at": "2026-06-02T09:40:00+08:00",
+            "sequence": 1,
+            "content": "b",
+        }
+
+        merged = merge_news_records([[first], [second, newer]], snapshot_files=["a.jsonl", "b.jsonl"])
+
+        self.assertEqual([record["dedupe_key"] for record in merged], ["k2", "k1"])
+        self.assertEqual(merged[1]["seen_count"], 2)
+        self.assertEqual(merged[1]["first_seen_at"], "2026-06-01T09:40:00+08:00")
+        self.assertEqual(merged[1]["last_seen_at"], "2026-06-02T09:40:00+08:00")
+        self.assertEqual(merged[1]["snapshot_files"], ["a.jsonl", "b.jsonl"])
 
     def test_record_csv_render_supports_flattened_news_rows(self) -> None:
         csv_text = render([{"src": "sina", "content": "a"}, {"src": "cls", "content": "b"}], "csv")
