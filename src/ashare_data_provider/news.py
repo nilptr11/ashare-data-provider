@@ -436,7 +436,32 @@ def _sort_news_record(record: dict[str, Any]) -> tuple[str, str, int]:
     )
 
 
-def merge_news_records(record_groups: list[list[dict[str, Any]]], snapshot_files: list[str] | None = None) -> list[dict[str, Any]]:
+def _seen_count(record: dict[str, Any]) -> int:
+    try:
+        return max(int(record.get("seen_count") or 1), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _seen_times(record: dict[str, Any]) -> list[str]:
+    return [
+        str(value)
+        for value in [record.get("first_seen_at"), record.get("last_seen_at"), record.get("fetched_at")]
+        if value
+    ]
+
+
+def _snapshot_files(record: dict[str, Any], snapshot_file: str | None = None) -> list[str]:
+    files = []
+    existing = record.get("snapshot_files")
+    if isinstance(existing, list):
+        files.extend(str(value) for value in existing if value)
+    if snapshot_file and snapshot_file not in files:
+        files.append(snapshot_file)
+    return files
+
+
+def merge_news_records(record_groups: list[list[dict[str, Any]]], snapshot_files: list[str | None] | None = None) -> list[dict[str, Any]]:
     files = snapshot_files or []
     merged: dict[str, dict[str, Any]] = {}
     for group_index, records in enumerate(record_groups):
@@ -445,21 +470,22 @@ def merge_news_records(record_groups: list[list[dict[str, Any]]], snapshot_files
             key = _news_merge_key(record)
             if key not in merged:
                 merged[key] = dict(record)
-                merged[key]["first_seen_at"] = record.get("fetched_at")
-                merged[key]["last_seen_at"] = record.get("fetched_at")
-                merged[key]["seen_count"] = 1
-                merged[key]["snapshot_files"] = [snapshot_file] if snapshot_file else []
+                times = _seen_times(record)
+                merged[key]["first_seen_at"] = min(times) if times else None
+                merged[key]["last_seen_at"] = max(times) if times else None
+                merged[key]["seen_count"] = _seen_count(record)
+                merged[key]["snapshot_files"] = _snapshot_files(record, snapshot_file)
                 continue
 
             existing = merged[key]
-            fetched_at = record.get("fetched_at")
-            if fetched_at:
-                seen_times = [value for value in [existing.get("first_seen_at"), existing.get("last_seen_at"), fetched_at] if value]
+            seen_times = _seen_times(existing) + _seen_times(record)
+            if seen_times:
                 existing["first_seen_at"] = min(seen_times)
                 existing["last_seen_at"] = max(seen_times)
-            existing["seen_count"] = int(existing.get("seen_count") or 1) + 1
-            if snapshot_file and snapshot_file not in existing.get("snapshot_files", []):
-                existing.setdefault("snapshot_files", []).append(snapshot_file)
+            existing["seen_count"] = _seen_count(existing) + _seen_count(record)
+            for file in _snapshot_files(record, snapshot_file):
+                if file not in existing.get("snapshot_files", []):
+                    existing.setdefault("snapshot_files", []).append(file)
 
     return sorted(merged.values(), key=_sort_news_record, reverse=True)
 

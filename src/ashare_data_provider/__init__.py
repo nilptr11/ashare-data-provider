@@ -21,6 +21,14 @@ from .news import (
     normalize_news_sources,
     parse_news_page,
 )
+from .news_store import (
+    merge_news_date_partitions,
+    news_date_partition_path,
+    news_record_date,
+    normalize_news_date,
+    partition_news_records_by_date,
+    read_news_date_partitions,
+)
 from .provider import (
     TushareInterfaceSelectionError,
     TusharePermissionError,
@@ -76,6 +84,12 @@ __all__ = [
     "load_api_schemas",
     "load_recipes",
     "load_registry",
+    "merge_news_date_partitions",
+    "news_date_partition_path",
+    "news_record_date",
+    "normalize_news_date",
     "normalize_news_sources",
+    "partition_news_records_by_date",
     "parse_news_page",
+    "read_news_date_partitions",
 ]

@@ -138,6 +138,32 @@ class NewsTest(unittest.TestCase):
         self.assertEqual(merged[1]["last_seen_at"], "2026-06-02T09:40:00+08:00")
         self.assertEqual(merged[1]["snapshot_files"], ["a.jsonl", "b.jsonl"])
 
+    def test_merge_news_records_preserves_existing_seen_metadata(self) -> None:
+        existing = {
+            "dedupe_key": "k1",
+            "datetime": "2026-06-01 09:31:00",
+            "fetched_at": "2026-06-02T09:40:00+08:00",
+            "first_seen_at": "2026-06-01T09:40:00+08:00",
+            "last_seen_at": "2026-06-02T09:40:00+08:00",
+            "seen_count": 2,
+            "snapshot_files": ["news.jsonl", "snapshot-a.jsonl"],
+            "content": "a",
+        }
+        current = {
+            "dedupe_key": "k1",
+            "datetime": "2026-06-01 09:31:00",
+            "fetched_at": "2026-06-03T09:40:00+08:00",
+            "content": "a",
+        }
+
+        merged = merge_news_records([[existing], [current]], snapshot_files=["news.jsonl", "snapshot-b.jsonl"])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["seen_count"], 3)
+        self.assertEqual(merged[0]["first_seen_at"], "2026-06-01T09:40:00+08:00")
+        self.assertEqual(merged[0]["last_seen_at"], "2026-06-03T09:40:00+08:00")
+        self.assertEqual(merged[0]["snapshot_files"], ["news.jsonl", "snapshot-a.jsonl", "snapshot-b.jsonl"])
+
     def test_record_csv_render_supports_flattened_news_rows(self) -> None:
         csv_text = render([{"src": "sina", "content": "a"}, {"src": "cls", "content": "b"}], "csv")
 
