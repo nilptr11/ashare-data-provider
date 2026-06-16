@@ -53,6 +53,17 @@ class CliEventsTest(unittest.TestCase):
         self.assertEqual(exc.exception.code, 2)
         self.assertIn("invalid choice", stderr.getvalue())
 
+    def test_cache_command_is_not_public(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as exc:
+                main(["cache", "call", "daily"])
+
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("invalid choice", stderr.getvalue())
+
     def test_events_news_writes_snapshot_and_merged_output(self) -> None:
         payload = {"sources": [], "records": [{"dedupe_key": "k1", "datetime": "2026-06-03 09:31:00", "fetched_at": "2026-06-03T09:40:00+08:00", "src": "cls"}]}
         with tempfile.TemporaryDirectory() as tmp_dir:

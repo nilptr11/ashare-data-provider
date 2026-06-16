@@ -100,6 +100,12 @@ ashare call stock_basic \
   --output stock_basic.csv
 ```
 
+### 本地持久化数据
+
+普通 Tushare 调用会透明使用本地持久化数据：本地已有成功数据时直接读取，本地缺失时请求 API，API 成功后写入 Parquet；API 失败或返回空结果不会写入本地，下次会继续请求。默认写入 `data/tushare`，也可以通过 `ASHARE_DATA_DIR` 指定根目录。
+
+带 `trade_date` 的请求按天落盘；带 `start_date/end_date` 且接口支持 `trade_date` 时，会先通过交易日历拆成真实交易日，再逐日补缺并拼接返回。
+
 ### A 股事件能力
 
 当前高层事件能力明确为三类：A 股公告、业绩预告、时讯。公告和业绩预告走 AKShare；Tushare `forecast` 与 `news` API 暂时不作为高层能力使用。时讯继续抓取登录后可见的 Tushare 资讯页，作为当前快讯替代源。

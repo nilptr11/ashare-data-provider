@@ -10,5 +10,6 @@ venv/
 dist/
 build/
 reports/
+data/
 *.csv
 *.jsonl

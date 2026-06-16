@@ -15,7 +15,8 @@ dependencies = [
   "beautifulsoup4>=4.12",
   "tushare>=1.4.21",
   "akshare>=1.18.64",
-  "pandas>=2.3.0"
+  "pandas>=2.3.0",
+  "pyarrow>=16.0.0"
 ]
 
 [project.scripts]

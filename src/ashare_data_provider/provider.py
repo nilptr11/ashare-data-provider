@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any
 
+from .cache import CachePolicy, LocalCacheExecutor
 from .client import TushareCaller, TushareError
 from .config import TushareConfig, load_config
 from .defaults import default_params as configured_default_params
+from .local_store import LocalDataStore, normalize_cache_params
 from .recipes import default_fields, default_recipe_params
 from .registry import InterfaceEntry, InterfaceRegistry, load_registry
+from .schemas import SchemaError, get_api_schema
 
 
 STOCK_BASIC_FIELDS = default_fields("stock_basic")
@@ -102,6 +106,8 @@ class AShareProvider:
         allow_separate_permission: bool | None = None,
         caller: TushareCaller | None = None,
         registry: InterfaceRegistry | None = None,
+        cache_enabled: bool = True,
+        data_dir: str | Path | None = None,
     ) -> None:
         self._env_file = env_file
         self._config = load_config(
@@ -113,6 +119,9 @@ class AShareProvider:
         )
         self._registry = registry or load_registry()
         self._caller = caller or TushareCaller(env_file=env_file, config=self._config)
+        self._cache_enabled = cache_enabled
+        self._data_dir = data_dir
+        self._cache_policy = CachePolicy()
 
     @property
     def config(self) -> TushareConfig:
@@ -193,7 +202,91 @@ class AShareProvider:
         if use_defaults:
             resolved_params.update(configured_default_params(api_name, doc_id=doc_id, key=key))
         resolved_params.update(params or {})
-        return self._caller.call(api_name, params=resolved_params, fields=fields)
+        if not self._cache_enabled or not self._should_use_local_store(api_name, resolved_params, doc_id=doc_id, key=key):
+            return self._call_remote(api_name, params=resolved_params, fields=fields)
+        return self._call_with_local_store(
+            api_name,
+            params=resolved_params,
+            fields=fields,
+            data_dir=self._data_dir,
+            doc_id=doc_id,
+            key=key,
+            force=force,
+        )
+
+    def _call_remote(self, api_name: str, params: dict[str, Any] | None = None, fields: str | None = None) -> Any:
+        return self._caller.call(api_name, params=params, fields=fields)
+
+    def _should_use_local_store(
+        self,
+        api_name: str,
+        params: dict[str, Any] | None,
+        doc_id: str | None = None,
+        key: str | None = None,
+    ) -> bool:
+        normalized_params = normalize_cache_params(params)
+        supports_trade_date = self._api_supports_param(api_name, "trade_date", doc_id=doc_id, key=key)
+        return self._cache_policy.enabled_for(
+            api_name,
+            normalized_params,
+            supports_trade_date=supports_trade_date,
+        )
+
+    def _call_with_local_store(
+        self,
+        api_name: str,
+        params: dict[str, Any] | None = None,
+        fields: str | None = None,
+        mode: str = "prefer",
+        data_dir: str | Path | None = None,
+        split_by_trade_date: bool = True,
+        use_defaults: bool = False,
+        doc_id: str | None = None,
+        key: str | None = None,
+        force: bool = False,
+    ) -> Any:
+        resolved_params: dict[str, Any] = {}
+        if use_defaults:
+            resolved_params.update(configured_default_params(api_name, doc_id=doc_id, key=key))
+        resolved_params.update(params or {})
+        normalized_params = normalize_cache_params(resolved_params)
+        store = LocalDataStore(data_dir=data_dir, env_file=self._env_file)
+        policy = CachePolicy(split_by_trade_date=split_by_trade_date)
+        supports_trade_date = self._api_supports_param(api_name, "trade_date", doc_id=doc_id, key=key)
+        request_params = policy.request_params(
+            api_name,
+            normalized_params,
+            supports_trade_date=supports_trade_date,
+            trade_dates_between=lambda start_text, end_text: self._trade_dates_between(start_text, end_text, force=force),
+        )
+        executor = LocalCacheExecutor(store=store, remote_call=self._call_remote)
+        return executor.call(api_name, request_params=request_params, fields=fields, mode=mode)
+
+    def _trade_dates_between(self, start_text: str, end_text: str, force: bool = False) -> list[str]:
+        calendar = self.trade_cal(
+            start_date=start_text,
+            end_date=end_text,
+            fields="cal_date,is_open",
+            force=force,
+        )
+        records = _calendar_records(calendar, start_text, end_text)
+        return [
+            _format_yyyymmdd(row["cal_date"])
+            for row in records
+            if str(row.get("is_open")).lower() in {"1", "1.0", "true"}
+            and start_text <= _format_yyyymmdd(row["cal_date"]) <= end_text
+        ]
+
+    @staticmethod
+    def _api_supports_param(api_name: str, param_name: str, doc_id: str | None = None, key: str | None = None) -> bool:
+        try:
+            schema = get_api_schema(api_name, doc_id=doc_id, key=key)
+        except SchemaError:
+            return False
+        names = {param.name for param in schema.input_params}
+        names.update(schema.required_params)
+        names.update(schema.optional_params)
+        return param_name in names
 
     def stock_basic(
         self,

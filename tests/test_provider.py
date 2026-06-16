@@ -50,6 +50,7 @@ def make_provider(registry, caller=None, **kwargs):
             env_file="/tmp/ashare-data-provider-test-missing.env",
             registry=registry,
             caller=caller or FakeCaller(),
+            cache_enabled=False,
             **kwargs,
         )
 
