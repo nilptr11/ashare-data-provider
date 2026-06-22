@@ -19,6 +19,14 @@ NOTICE_CATEGORIES = {
     "持股变动",
 }
 QUARTER_ENDS = ("0331", "0630", "0930", "1231")
+NOTICE_COLUMN_ALIASES = {
+    "代码": ("代码", "股票代码", "证券代码", "stock_code", "security_code"),
+    "名称": ("名称", "股票简称", "证券简称", "stock_name", "security_name"),
+    "公告标题": ("公告标题", "标题", "公告名称", "title"),
+    "公告类型": ("公告类型", "类型", "notice_type"),
+    "公告日期": ("公告日期", "发布日期", "披露日期", "publish_date"),
+    "网址": ("网址", "公告链接", "链接", "url"),
+}
 
 
 class AStockEventError(RuntimeError):
@@ -124,6 +132,67 @@ def run_akshare(call: Callable[[], Any], timeout: int = 30, verbose_source: bool
         signal.signal(signal.SIGALRM, old_handler)
 
 
+def _first_existing_column(columns: Iterable[str], aliases: Iterable[str]) -> str | None:
+    column_set = {str(column) for column in columns}
+    for alias in aliases:
+        if alias in column_set:
+            return alias
+    return None
+
+
+def _normalize_notice_frame(df: Any, stock: str | None = None) -> Any:
+    pd = _load_pandas()
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    result = df.copy()
+    for standard_column, aliases in NOTICE_COLUMN_ALIASES.items():
+        if standard_column in result.columns:
+            continue
+        source_column = _first_existing_column(result.columns, aliases)
+        if source_column is not None:
+            result[standard_column] = result[source_column]
+
+    if stock and "代码" not in result.columns:
+        result["代码"] = stock
+
+    for column in NOTICE_COLUMN_ALIASES:
+        if column not in result.columns:
+            result[column] = None
+    return result
+
+
+def _notice_missing_code_error(exc: Exception) -> bool:
+    return isinstance(exc, KeyError) and str(exc).strip("\"'") == "代码"
+
+
+def _fetch_notice_by_day(
+    ak: Any,
+    pd: Any,
+    days: int,
+    anchor: date,
+    category: str,
+    timeout: int,
+    verbose_source: bool,
+) -> Any:
+    frames = []
+    for offset in range(days):
+        day = anchor - timedelta(days=offset)
+        try:
+            df_day = run_akshare(
+                lambda day=day: ak.stock_notice_report(symbol=category, date=day.strftime("%Y%m%d")),
+                timeout=timeout,
+                verbose_source=verbose_source,
+            )
+        except Exception as exc:
+            if _notice_missing_code_error(exc):
+                continue
+            raise
+        if df_day is not None and not df_day.empty:
+            frames.append(_normalize_notice_frame(df_day))
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def fetch_notice(
     days: int = 7,
     end_date: str | date | datetime | None = None,
@@ -143,28 +212,28 @@ def fetch_notice(
     start = anchor - timedelta(days=days - 1)
 
     if stock:
-        df = run_akshare(
-            lambda: ak.stock_individual_notice_report(
-                security=stock,
-                symbol=category,
-                begin_date=start.strftime("%Y%m%d"),
-                end_date=anchor.strftime("%Y%m%d"),
-            ),
-            timeout=timeout,
-            verbose_source=verbose_source,
-        )
-    else:
-        frames = []
-        for offset in range(days):
-            day = anchor - timedelta(days=offset)
-            df_day = run_akshare(
-                lambda day=day: ak.stock_notice_report(symbol=category, date=day.strftime("%Y%m%d")),
+        try:
+            df = run_akshare(
+                lambda: ak.stock_individual_notice_report(
+                    security=stock,
+                    symbol=category,
+                    begin_date=start.strftime("%Y%m%d"),
+                    end_date=anchor.strftime("%Y%m%d"),
+                ),
                 timeout=timeout,
                 verbose_source=verbose_source,
             )
-            if df_day is not None and not df_day.empty:
-                frames.append(df_day)
-        df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            df = _normalize_notice_frame(df, stock=stock)
+        except Exception as exc:
+            if not _notice_missing_code_error(exc):
+                raise
+            df = _fetch_notice_by_day(ak, pd, days, anchor, category, timeout, verbose_source)
+            if "代码" in df.columns:
+                df = df[df["代码"].astype(str) == str(stock)]
+            else:
+                df = pd.DataFrame()
+    else:
+        df = _fetch_notice_by_day(ak, pd, days, anchor, category, timeout, verbose_source)
 
     prepared = prepare_notice(df, keyword=keyword, start=start, end=anchor)
     return build_notice_records(prepared) if as_records else prepared

@@ -29,6 +29,8 @@ from .provider import (
     TushareUnknownInterfaceError,
 )
 from .registry import InterfaceEntry, load_registry
+from .research_context import build_research_context
+from .research_summary import build_research_summary, load_research_context, render_research_summary_markdown
 from .schemas import SchemaError, get_api_schema
 
 
@@ -86,6 +88,30 @@ def build_parser() -> argparse.ArgumentParser:
     call_parser.add_argument("--max-rows", type=int, default=0, help="只输出前 N 行，0 表示不限制")
     call_parser.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
     call_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    research_parser = subparsers.add_parser("research-context", help="生成 Prism 可消费的 A 股投研上下文 JSON")
+    research_parser.add_argument("ts_code", help="Tushare 股票代码，如 000001.SZ")
+    research_parser.add_argument("--as-of", help="分析日期，支持 YYYYMMDD 或 YYYY-MM-DD，默认本地当天")
+    research_parser.add_argument("--profile", choices=["basic", "standard", "full"], default="basic", help="采集档位：basic 只拉核心行情；standard 增加财务/事件/资金；full 尝试完整数据")
+    research_parser.add_argument("--lookback-days", type=int, default=120, help="行情回看自然日天数，默认 120")
+    research_parser.add_argument("--financial-years", type=int, default=3, help="财务数据回看年数，默认 3")
+    research_parser.add_argument("--event-days", type=int, default=90, help="公告事件回看自然日天数，默认 90")
+    research_parser.add_argument("--forecast-days", type=int, default=180, help="业绩预告回看自然日天数，默认 180")
+    research_parser.add_argument("--include-news", action="store_true", help="同时抓取 Tushare 资讯页时讯；需要 TUSHARE_COOKIE")
+    research_parser.add_argument("--news-source", action="append", choices=DEFAULT_NEWS_SOURCES, help="资讯来源 slug，可重复传入")
+    research_parser.add_argument("--max-rows-per-dataset", type=int, default=240, help="每个数据集最多保留多少条，0 表示不限制")
+    research_parser.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN")
+    research_parser.add_argument("--proxy-url", help="Tushare API 代理地址；默认读取 TUSHARE_PROXY_URL")
+    research_parser.add_argument("--env-file", default=".env", help="配置文件路径，默认自动查找 .env")
+    research_parser.add_argument("--current-points", type=int, help="当前账号积分；默认读取 TUSHARE_POINTS")
+    research_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    summary_parser = subparsers.add_parser("research-summary", help="从 research-context JSON 生成稳定摘要")
+    summary_parser.add_argument("context_file", help="research-context 输出的 JSON 文件")
+    summary_parser.add_argument("--format", choices=["json", "markdown"], default="markdown")
+    summary_parser.add_argument("--max-events", type=int, default=10, help="最多保留多少条事件线索，默认 10")
+    summary_parser.add_argument("--max-segments", type=int, default=12, help="最多保留多少个主营分部，默认 12")
+    summary_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
     def add_news_arguments(news_parser: argparse.ArgumentParser) -> None:
         news_parser.add_argument("--all", action="store_true", help="抓取全部已知来源；未指定 --source 时默认全部")
@@ -266,6 +292,48 @@ def _handle_call(args: argparse.Namespace) -> int:
     except (TushareInterfaceSelectionError, TusharePermissionError, TushareUnknownInterfaceError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except Exception as exc:  # noqa: BLE001
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
+def _handle_research_context(args: argparse.Namespace) -> int:
+    try:
+        provider = AShareProvider(
+            token=args.token,
+            proxy_url=args.proxy_url,
+            env_file=args.env_file,
+            points=args.current_points,
+        )
+        context = build_research_context(
+            ts_code=args.ts_code,
+            as_of=args.as_of,
+            profile=args.profile,
+            lookback_days=args.lookback_days,
+            financial_years=args.financial_years,
+            event_days=args.event_days,
+            forecast_days=args.forecast_days,
+            include_news=args.include_news,
+            news_sources=args.news_source,
+            max_rows_per_dataset=args.max_rows_per_dataset,
+            provider=provider,
+        )
+        emit(json.dumps(context, ensure_ascii=False, default=str, indent=2), args.output)
+    except Exception as exc:  # noqa: BLE001
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
+def _handle_research_summary(args: argparse.Namespace) -> int:
+    try:
+        context = load_research_context(args.context_file)
+        summary = build_research_summary(context, max_events=args.max_events, max_segments=args.max_segments)
+        if args.format == "json":
+            emit(json.dumps(summary, ensure_ascii=False, default=str, indent=2), args.output)
+        else:
+            emit(render_research_summary_markdown(summary), args.output)
     except Exception as exc:  # noqa: BLE001
         print(str(exc), file=sys.stderr)
         return 1
@@ -463,6 +531,8 @@ def main(argv: list[str] | None = None) -> int:
         "schema": _handle_schema,
         "info": _handle_info,
         "call": _handle_call,
+        "research-context": _handle_research_context,
+        "research-summary": _handle_research_summary,
         "events": _handle_events,
     }
     return handlers[args.command](args)

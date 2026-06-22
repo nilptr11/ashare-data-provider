@@ -1,0 +1,577 @@
+{
+  "version": 1,
+  "updated_at": "2026-06-22",
+  "scope": "A-share research context source policy for Prism.",
+  "principles": [
+    "Prefer structured project data over ad hoc web search.",
+    "Do not call Tushare interfaces that require separate permission.",
+    "Use unknown-eligibility Tushare interfaces only after smoke verification or an existing successful local cache.",
+    "Use official or exchange sources for regulatory, announcement, macro, and policy data.",
+    "Use non-official finance websites as auxiliary sources unless no official source exists for that data type."
+  ],
+  "tushare": {
+    "blocked_eligibility": ["needs_separate_permission"],
+    "blocked_apis": {
+      "news": {
+        "reason": "requires separate permission",
+        "replacement_source_groups": ["event_news", "finance_news"]
+      },
+      "research_report": {
+        "reason": "requires separate permission",
+        "replacement_source_groups": ["research_reports"]
+      },
+      "irm_qa_sz": {
+        "reason": "requires separate permission",
+        "replacement_source_groups": ["investor_relations_qa"]
+      },
+      "irm_qa_sh": {
+        "reason": "requires separate permission",
+        "replacement_source_groups": ["investor_relations_qa"]
+      },
+      "npr": {
+        "reason": "requires separate permission",
+        "replacement_source_groups": ["policy"]
+      },
+      "idx_mins": {
+        "reason": "requires separate permission",
+        "replacement_source_groups": ["intraday_market"]
+      },
+      "rt_sw_k": {
+        "reason": "requires separate permission",
+        "replacement_source_groups": ["industry_market"]
+      },
+      "stk_mins": {
+        "reason": "requires separate permission for stock minute bars",
+        "replacement_source_groups": ["intraday_market"]
+      },
+      "cb_price_chg": {
+        "reason": "requires separate permission",
+        "replacement_source_groups": ["convertible_bond"]
+      },
+      "rt_fut_min": {
+        "reason": "requires separate permission and out of A-share MVP scope",
+        "replacement_source_groups": ["out_of_scope"]
+      },
+      "ft_mins": {
+        "reason": "requires separate permission and out of A-share MVP scope",
+        "replacement_source_groups": ["out_of_scope"]
+      },
+      "hk_daily": {
+        "reason": "requires separate permission and out of A-share MVP scope",
+        "replacement_source_groups": ["out_of_scope"]
+      },
+      "rt_hk_k": {
+        "reason": "requires separate permission and out of A-share MVP scope",
+        "replacement_source_groups": ["out_of_scope"]
+      },
+      "hk_income": {
+        "reason": "requires separate permission and out of A-share MVP scope",
+        "replacement_source_groups": ["out_of_scope"]
+      },
+      "hk_balancesheet": {
+        "reason": "requires separate permission and out of A-share MVP scope",
+        "replacement_source_groups": ["out_of_scope"]
+      },
+      "hk_cashflow": {
+        "reason": "requires separate permission and out of A-share MVP scope",
+        "replacement_source_groups": ["out_of_scope"]
+      },
+      "hk_fina_indicator": {
+        "reason": "requires separate permission and out of A-share MVP scope",
+        "replacement_source_groups": ["out_of_scope"]
+      }
+    },
+    "preferred_apis": {
+      "identity": ["stock_basic", "stock_company", "stock_hsgt", "stock_st", "st"],
+      "calendar": ["trade_cal"],
+      "market_daily": ["daily", "daily_basic", "adj_factor", "stk_limit", "pro_bar"],
+      "market_weekly_monthly": ["weekly", "monthly", "stk_weekly_monthly", "stk_week_month_adj"],
+      "index_and_industry": ["index_daily", "index_dailybasic", "sw_daily", "ci_daily", "index_member_all", "ci_index_member", "index_classify", "index_weight", "daily_info", "sz_daily_info"],
+      "fundamentals": ["income", "balancesheet", "cashflow", "fina_indicator", "fina_mainbz", "express", "forecast", "dividend", "fina_audit", "disclosure_date"],
+      "shareholders": ["top10_holders", "top10_floatholders", "stk_holdertrade", "pledge_stat", "pledge_detail", "share_float", "repurchase"],
+      "margin_and_flow": ["margin_detail", "slb_len", "moneyflow_ind_ths", "moneyflow_ind_dc", "moneyflow_cnt_ths"],
+      "themes_and_short_term": ["limit_list_d", "limit_list_ths", "limit_step", "limit_cpt_list", "top_list", "dc_daily", "ths_member", "tdx_member", "tdx_daily", "ths_hot", "kpl_list"],
+      "macro": ["shibor", "shibor_quote", "cn_ppi", "cn_gdp", "sf_month", "us_trycr", "us_tltr", "hibor", "wz_index", "gz_index"],
+      "events": ["eco_cal"]
+    },
+    "conditional_unknown_apis": {
+      "allow_when": [
+        "smoke_status == success",
+        "local_cache has successful current data for exact params",
+        "operator explicitly permits exploratory call"
+      ],
+      "examples": ["daily", "pro_bar", "trade_cal", "cn_cpi", "shibor_lpr", "cn_pmi", "cn_m", "moneyflow", "moneyflow_hsgt", "rt_k", "rt_min", "forecast"]
+    }
+  },
+  "project_builtin_sources": {
+    "event_news": {
+      "description": "Tushare visible news page crawler with standard news records.",
+      "provider_method": "AShareProvider.event_news",
+      "trust_level": "auxiliary",
+      "notes": "Current visible page only; not a historical news API replacement."
+    },
+    "announcements": {
+      "description": "AKShare announcement records.",
+      "provider_method": "AShareProvider.a_stock_notice",
+      "trust_level": "primary_for_discovery"
+    },
+    "earnings_forecast": {
+      "description": "AKShare earnings forecast records.",
+      "provider_method": "AShareProvider.earnings_forecast",
+      "trust_level": "primary_for_discovery"
+    }
+  },
+  "external_source_groups": {
+    "announcements": [
+      {
+        "id": "sse_announcements",
+        "name": "Shanghai Stock Exchange listed company announcements",
+        "url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/",
+        "domains": ["sse.com.cn"],
+        "trust_level": "official",
+        "use_for": ["SSE announcements", "regulatory disclosure"]
+      },
+      {
+        "id": "szse_announcements",
+        "name": "Shenzhen Stock Exchange listed company announcements",
+        "url": "https://www.szse.cn/disclosure/listed/notice/index.html",
+        "domains": ["szse.cn"],
+        "trust_level": "official",
+        "use_for": ["SZSE announcements", "regulatory disclosure"]
+      },
+      {
+        "id": "cninfo_disclosure",
+        "name": "CNINFO disclosure",
+        "url": "https://www.cninfo.com.cn/new/disclosure",
+        "domains": ["cninfo.com.cn"],
+        "trust_level": "official_aggregator",
+        "use_for": ["A-share announcements", "periodic reports"]
+      },
+      {
+        "id": "eastmoney_notices",
+        "name": "Eastmoney notices",
+        "url": "https://data.eastmoney.com/notices/",
+        "domains": ["eastmoney.com"],
+        "trust_level": "auxiliary",
+        "use_for": ["announcement discovery", "cross-check"]
+      }
+    ],
+    "macro": [
+      {
+        "id": "stats_national_data",
+        "name": "National Bureau of Statistics national data",
+        "url": "https://data.stats.gov.cn/",
+        "domains": ["data.stats.gov.cn", "stats.gov.cn"],
+        "trust_level": "official",
+        "use_for": ["CPI", "PPI", "PMI", "GDP"]
+      },
+      {
+        "id": "pbc_interest_rates",
+        "name": "People's Bank of China interest rates",
+        "url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/index.html",
+        "domains": ["pbc.gov.cn"],
+        "trust_level": "official",
+        "use_for": ["LPR", "interest rate policy"]
+      },
+      {
+        "id": "shibor",
+        "name": "Shanghai Interbank Offered Rate",
+        "url": "https://www.shibor.org/",
+        "domains": ["shibor.org"],
+        "trust_level": "official_or_designated_publisher",
+        "use_for": ["Shibor rates"]
+      },
+      {
+        "id": "fred_dgs10",
+        "name": "FRED 10-year Treasury constant maturity rate",
+        "url": "https://fred.stlouisfed.org/series/DGS10",
+        "domains": ["fred.stlouisfed.org"],
+        "trust_level": "official_data_repository",
+        "use_for": ["US 10-year treasury yield"]
+      }
+    ],
+    "moneyflow": [
+      {
+        "id": "eastmoney_moneyflow",
+        "name": "Eastmoney money flow data center",
+        "url": "https://data.eastmoney.com/zjlx/",
+        "domains": ["eastmoney.com"],
+        "trust_level": "auxiliary",
+        "use_for": ["market money flow", "stock money flow", "sector money flow", "northbound flow"]
+      }
+    ],
+    "research_reports": [
+      {
+        "id": "eastmoney_reports",
+        "name": "Eastmoney research reports",
+        "url": "https://data.eastmoney.com/report/",
+        "domains": ["eastmoney.com"],
+        "trust_level": "auxiliary",
+        "use_for": ["report metadata", "consensus and expectation clues"],
+        "notes": "Do not treat report opinions as facts."
+      }
+    ],
+    "investor_relations_qa": [
+      {
+        "id": "cninfo_irm",
+        "name": "SZSE EasyIR via CNINFO",
+        "url": "https://irm.cninfo.com.cn/",
+        "domains": ["irm.cninfo.com.cn"],
+        "trust_level": "official_platform",
+        "use_for": ["SZSE investor Q&A"]
+      },
+      {
+        "id": "sse_einteractive",
+        "name": "SSE e-interactive",
+        "url": "https://sns.sseinfo.com/",
+        "domains": ["sns.sseinfo.com"],
+        "trust_level": "official_platform",
+        "use_for": ["SSE investor Q&A"]
+      }
+    ],
+    "policy": [
+      {
+        "id": "gov_cn",
+        "name": "State Council and China government portal",
+        "url": "https://www.gov.cn/",
+        "domains": ["gov.cn"],
+        "trust_level": "official",
+        "use_for": ["national policy", "State Council releases"]
+      },
+      {
+        "id": "csrc",
+        "name": "China Securities Regulatory Commission",
+        "url": "https://www.csrc.gov.cn/",
+        "domains": ["csrc.gov.cn"],
+        "trust_level": "official",
+        "use_for": ["securities regulation"]
+      },
+      {
+        "id": "ndrc",
+        "name": "National Development and Reform Commission",
+        "url": "https://www.ndrc.gov.cn/",
+        "domains": ["ndrc.gov.cn"],
+        "trust_level": "official",
+        "use_for": ["industrial policy", "macro policy"]
+      },
+      {
+        "id": "miit",
+        "name": "Ministry of Industry and Information Technology",
+        "url": "https://www.miit.gov.cn/",
+        "domains": ["miit.gov.cn"],
+        "trust_level": "official",
+        "use_for": ["industry policy", "manufacturing and technology policy"]
+      },
+      {
+        "id": "mee",
+        "name": "Ministry of Ecology and Environment",
+        "url": "https://www.mee.gov.cn/",
+        "domains": ["mee.gov.cn"],
+        "trust_level": "official",
+        "use_for": ["environmental policy", "pollution control", "carbon and ecology policy"]
+      },
+      {
+        "id": "nea",
+        "name": "National Energy Administration",
+        "url": "https://www.nea.gov.cn/",
+        "domains": ["nea.gov.cn"],
+        "trust_level": "official",
+        "use_for": ["energy policy", "power market policy", "renewable energy policy"]
+      }
+    ],
+    "finance_news": [
+      {
+        "id": "eastmoney_kuaixun",
+        "name": "Eastmoney global finance news flash",
+        "url": "https://kuaixun.eastmoney.com/",
+        "domains": ["eastmoney.com"],
+        "trust_level": "auxiliary",
+        "use_for": ["event discovery"]
+      },
+      {
+        "id": "cls",
+        "name": "Cailian Press",
+        "url": "https://www.cls.cn/",
+        "domains": ["cls.cn"],
+        "trust_level": "auxiliary",
+        "use_for": ["event discovery"]
+      },
+      {
+        "id": "sina_finance",
+        "name": "Sina Finance",
+        "url": "https://finance.sina.com.cn/",
+        "domains": ["finance.sina.com.cn"],
+        "trust_level": "auxiliary",
+        "use_for": ["event discovery", "market news cross-check"]
+      }
+    ],
+    "intraday_market": [
+      {
+        "id": "user_screenshot",
+        "name": "User-provided broker or TradingView screenshot",
+        "url": "",
+        "domains": [],
+        "trust_level": "user_provided",
+        "use_for": ["minute bars", "intraday volume", "live price context"]
+      },
+      {
+        "id": "eastmoney_quote",
+        "name": "Eastmoney quote center",
+        "url": "https://quote.eastmoney.com/",
+        "domains": ["quote.eastmoney.com"],
+        "trust_level": "auxiliary",
+        "use_for": ["live quote", "intraday reference"]
+      }
+    ],
+    "industry_market": [
+      {
+        "id": "eastmoney_sector_quote",
+        "name": "Eastmoney sector quote",
+        "url": "https://quote.eastmoney.com/center/boardlist.html",
+        "domains": ["quote.eastmoney.com"],
+        "trust_level": "auxiliary",
+        "use_for": ["sector quote", "real-time sector fallback"]
+      }
+    ],
+    "convertible_bond": [
+      {
+        "id": "sse_szse_bond_disclosure",
+        "name": "Exchange bond disclosures",
+        "url": "",
+        "domains": ["sse.com.cn", "szse.cn"],
+        "trust_level": "official",
+        "use_for": ["convertible bond announcements and disclosures"]
+      }
+    ],
+    "out_of_scope": []
+  },
+  "dynamic_source_discovery": {
+    "scope": "LLM-controlled discovery for industry-specific facts that cannot be covered by a universal A-share structured dataset.",
+    "allowed_when": [
+      "The fact is industry-specific, such as supply-demand, capacity, utilization, order backlog, tender data, commodity price, installed capacity, policy subsidy, technology standard, or customer concentration.",
+      "Project structured data does not provide the fact, or only provides generic financial/market indicators.",
+      "The final report clearly separates discovered facts from project-provider facts."
+    ],
+    "not_allowed_for": [
+      "Replacing project price, valuation, financial statements, shareholder, pledge, repurchase, or official announcement facts when project data is available.",
+      "Using generic finance media as the sole source for audited financial, regulatory, macro, or company-specific material facts.",
+      "Inferring company orders, customers, capacity, or market share from industry news without company filings or a primary/official source."
+    ],
+    "source_classes": [
+      {
+        "id": "official_government_or_regulator",
+        "trust_level": "official",
+        "examples": ["gov.cn", "stats.gov.cn", "pbc.gov.cn", "ndrc.gov.cn", "miit.gov.cn", "mee.gov.cn", "nea.gov.cn", "csrc.gov.cn"],
+        "use_for": ["policy", "macro", "industry regulation", "official statistical releases"]
+      },
+      {
+        "id": "exchange_or_disclosure_platform",
+        "trust_level": "official_or_official_aggregator",
+        "examples": ["sse.com.cn", "szse.cn", "cninfo.com.cn"],
+        "use_for": ["company filings", "periodic reports", "regulatory announcements"]
+      },
+      {
+        "id": "listed_company_official",
+        "trust_level": "company_primary",
+        "examples": ["company official website", "company investor relations page", "company annual report PDF"],
+        "use_for": ["company operations", "projects", "capacity", "customer disclosures", "business explanations"],
+        "notes": "Company claims should be cross-checked with formal filings when material."
+      },
+      {
+        "id": "industry_association_or_designated_publisher",
+        "trust_level": "sector_primary_or_auxiliary",
+        "examples": ["recognized industry associations", "officially designated market data publishers"],
+        "use_for": ["industry supply-demand", "installed capacity", "production/sales data", "sector statistics"]
+      },
+      {
+        "id": "commodity_exchange_or_index_provider",
+        "trust_level": "market_data_auxiliary",
+        "examples": ["commodity exchanges", "official price index publishers"],
+        "use_for": ["commodity prices", "input cost trends", "sector price indexes"]
+      },
+      {
+        "id": "reputable_finance_or_trade_media",
+        "trust_level": "auxiliary",
+        "examples": ["finance news", "trade press"],
+        "use_for": ["event discovery", "cross-check leads"],
+        "notes": "Cannot be the sole source for material facts."
+      }
+    ],
+    "evidence_requirements": [
+      "Record URL, source name, source_class id, query time, publish/update date when available, and the exact fact extracted.",
+      "State why the source is relevant to the target company's industry or business segment.",
+      "For every industry-specific conclusion, label it as project_data, official_external, company_external, association_external, or auxiliary_external.",
+      "If no acceptable source is found, write 暂无可靠数据 instead of broadening to low-quality sources."
+    ]
+  },
+  "gap_resolution": {
+    "default": {
+      "allowed_source_groups": [],
+      "action": "mark_unavailable",
+      "notes": "If no rule matches a data gap, do not freely search the web; mark it as 暂无可靠数据."
+    },
+    "rules": [
+      {
+        "id": "market_daily_gap",
+        "match": {
+          "section": "market",
+          "api_names": ["daily", "daily_basic", "pro_bar", "adj_factor", "stk_limit", "rt_k", "rt_min"]
+        },
+        "allowed_source_groups": ["intraday_market"],
+        "priority": ["user_screenshot", "eastmoney_quote"],
+        "critical_use": "auxiliary_only",
+        "notes": "For end-of-day facts prefer project data. External quotes are for live/intraday reference and must include query time."
+      },
+      {
+        "id": "index_market_gap",
+        "match": {
+          "section": "macro",
+          "api_names": ["index_daily", "index_dailybasic", "daily_info", "sz_daily_info", "index_global"]
+        },
+        "allowed_source_groups": ["industry_market", "intraday_market"],
+        "priority": ["eastmoney_sector_quote", "eastmoney_quote"],
+        "critical_use": "auxiliary_only",
+        "notes": "Use for broad market or index fallback. Prefer project Tushare index data when available."
+      },
+      {
+        "id": "industry_market_gap",
+        "match": {
+          "section": "industry",
+          "api_names": ["sw_daily", "ci_daily", "dc_daily", "ths_daily", "index_member_all", "ci_index_member", "ths_member", "dc_member"]
+        },
+        "allowed_source_groups": ["industry_market"],
+        "priority": ["eastmoney_sector_quote"],
+        "critical_use": "auxiliary_only",
+        "notes": "Use only for sector trend or membership clues; do not infer supply-demand facts from sector quotes."
+      },
+      {
+        "id": "financial_statement_gap",
+        "match": {
+          "section": "fundamentals",
+          "api_names": ["income", "balancesheet", "cashflow", "fina_indicator", "fina_mainbz", "express", "forecast", "dividend", "fina_audit", "disclosure_date"]
+        },
+        "allowed_source_groups": ["announcements"],
+        "priority": ["cninfo_disclosure", "sse_announcements", "szse_announcements", "eastmoney_notices"],
+        "critical_use": "official_required",
+        "notes": "Financial statement facts must come from official exchange/CNINFO filings or project structured data."
+      },
+      {
+        "id": "announcement_event_gap",
+        "match": {
+          "section": "events",
+          "names": ["announcements", "earnings_forecast"],
+          "api_names": ["anns_d", "forecast", "express"]
+        },
+        "allowed_source_groups": ["announcements"],
+        "priority": ["cninfo_disclosure", "sse_announcements", "szse_announcements", "eastmoney_notices"],
+        "critical_use": "official_required",
+        "notes": "Use official filings for event facts; Eastmoney may be used for discovery and cross-check."
+      },
+      {
+        "id": "macro_gap",
+        "match": {
+          "section": "macro",
+          "api_names": ["cn_cpi", "cn_ppi", "cn_pmi", "cn_gdp", "sf_month", "cn_m", "shibor", "shibor_quote", "shibor_lpr", "us_tltr", "us_trycr", "us_tycr", "us_tbr"]
+        },
+        "allowed_source_groups": ["macro", "policy"],
+        "priority": ["stats_national_data", "pbc_interest_rates", "shibor", "fred_dgs10", "gov_cn"],
+        "critical_use": "official_required",
+        "notes": "Macro values and policy statements require official or official-data-repository sources."
+      },
+      {
+        "id": "moneyflow_gap",
+        "match": {
+          "section": "trading",
+          "api_names": ["moneyflow", "moneyflow_hsgt", "moneyflow_ind_ths", "moneyflow_ind_dc", "moneyflow_mkt_dc", "moneyflow_ths", "moneyflow_dc", "moneyflow_cnt_ths"]
+        },
+        "allowed_source_groups": ["moneyflow"],
+        "priority": ["eastmoney_moneyflow"],
+        "critical_use": "auxiliary_only",
+        "notes": "Money-flow data is secondary confirmation, not a sole basis for investment conclusions."
+      },
+      {
+        "id": "margin_and_lhb_gap",
+        "match": {
+          "section": "trading",
+          "api_names": ["margin", "margin_detail", "top_list", "top_inst", "limit_list_d", "limit_list_ths", "limit_step", "limit_cpt_list"]
+        },
+        "allowed_source_groups": ["moneyflow", "finance_news"],
+        "priority": ["eastmoney_moneyflow", "eastmoney_kuaixun"],
+        "critical_use": "auxiliary_only",
+        "notes": "Use as short-term trading context only; do not present as fundamental verification."
+      },
+      {
+        "id": "shareholder_gap",
+        "match": {
+          "section": "fundamentals",
+          "api_names": ["top10_holders", "top10_floatholders", "stk_holdernumber", "stk_holdertrade", "pledge_stat", "pledge_detail", "share_float", "repurchase"]
+        },
+        "allowed_source_groups": ["announcements"],
+        "priority": ["cninfo_disclosure", "sse_announcements", "szse_announcements", "eastmoney_notices"],
+        "critical_use": "official_required",
+        "notes": "Use periodic reports and official announcements for shareholder, pledge, reduction, and repurchase facts."
+      },
+      {
+        "id": "investor_qa_gap",
+        "match": {
+          "section": "events",
+          "api_names": ["irm_qa_sz", "irm_qa_sh"]
+        },
+        "allowed_source_groups": ["investor_relations_qa"],
+        "priority": ["cninfo_irm", "sse_einteractive"],
+        "critical_use": "auxiliary_only",
+        "notes": "Investor Q&A is management communication and must not override formal filings."
+      },
+      {
+        "id": "policy_gap",
+        "match": {
+          "section": "macro",
+          "api_names": ["npr"]
+        },
+        "allowed_source_groups": ["policy"],
+        "priority": ["gov_cn", "csrc", "ndrc", "miit", "pbc_interest_rates"],
+        "critical_use": "official_required",
+        "notes": "Policy facts must come from official government or regulator domains."
+      },
+      {
+        "id": "news_gap",
+        "match": {
+          "section": "events",
+          "api_names": ["news", "major_news", "cctv_news"]
+        },
+        "allowed_source_groups": ["finance_news", "policy"],
+        "priority": ["eastmoney_kuaixun", "cls", "sina_finance", "gov_cn"],
+        "critical_use": "auxiliary_only",
+        "notes": "News is for event discovery; verify material company facts against announcements."
+      },
+      {
+        "id": "research_report_gap",
+        "match": {
+          "section": "fundamentals",
+          "api_names": ["research_report", "report_rc"]
+        },
+        "allowed_source_groups": ["research_reports"],
+        "priority": ["eastmoney_reports"],
+        "critical_use": "auxiliary_only",
+        "notes": "Research reports can describe expectations and disagreements but cannot be treated as factual verification."
+      }
+    ]
+  },
+  "search_rules": {
+    "allowed_when": [
+      "project data is unavailable",
+      "preferred Tushare interface is blocked or unavailable",
+      "external_source_groups explicitly include a source for the data type"
+    ],
+    "query_requirements": [
+      "Prefer site-restricted queries using the domains listed in external_source_groups.",
+      "Record source id, URL, query time, and data date.",
+      "Do not use generic search results for price, valuation, financial statements, macro data, or official announcements when an official source exists.",
+      "If allowed sources do not provide reliable data, mark the field as 暂无可靠数据."
+    ],
+    "non_official_limits": [
+      "Non-official sources may identify event leads or cross-check public datasets.",
+      "Non-official sources cannot be the sole basis for regulatory, audited financial, or macro policy conclusions."
+    ]
+  }
+}

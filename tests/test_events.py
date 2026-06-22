@@ -1,5 +1,6 @@
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -8,6 +9,7 @@ from ashare_data_provider.events import (
     auto_periods,
     build_forecast_records,
     build_notice_records,
+    fetch_notice,
     prepare_forecast,
     prepare_notice,
     validate_period,
@@ -58,6 +60,79 @@ class EventsTest(unittest.TestCase):
         self.assertEqual(records[0]["title"], "年度分红方案")
         self.assertEqual(len(records[0]["id"]), 64)
         self.assertEqual(records[0]["raw"]["网址"], "https://example.com/a.pdf")
+
+    def test_fetch_notice_falls_back_when_individual_endpoint_misses_code_column(self) -> None:
+        class FakeAk:
+            @staticmethod
+            def stock_individual_notice_report(**_kwargs):  # noqa: ANN003
+                raise KeyError("代码")
+
+            @staticmethod
+            def stock_notice_report(**_kwargs):  # noqa: ANN003
+                return pd.DataFrame(
+                    [
+                        {
+                            "股票代码": "600475",
+                            "股票简称": "华光环能",
+                            "公告标题": "年度报告",
+                            "公告类型": "财务报告",
+                            "公告日期": "2026-06-23",
+                            "网址": "https://example.com/600475.pdf",
+                        },
+                        {
+                            "股票代码": "000001",
+                            "股票简称": "平安银行",
+                            "公告标题": "其他公告",
+                            "公告类型": "重大事项",
+                            "公告日期": "2026-06-23",
+                            "网址": "https://example.com/000001.pdf",
+                        },
+                    ]
+                )
+
+        with patch("ashare_data_provider.events._load_akshare", return_value=(FakeAk, pd)):
+            records = fetch_notice(days=1, end_date="20260623", stock="600475")
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["stock_code"], "600475")
+        self.assertEqual(records[0]["stock_name"], "华光环能")
+        self.assertEqual(records[0]["title"], "年度报告")
+
+    def test_fetch_notice_adds_stock_code_when_individual_endpoint_omits_it(self) -> None:
+        class FakeAk:
+            @staticmethod
+            def stock_individual_notice_report(**_kwargs):  # noqa: ANN003
+                return pd.DataFrame(
+                    [
+                        {
+                            "公告标题": "个股公告",
+                            "公告类型": "重大事项",
+                            "公告日期": "2026-06-23",
+                            "网址": "https://example.com/notice.pdf",
+                        }
+                    ]
+                )
+
+        with patch("ashare_data_provider.events._load_akshare", return_value=(FakeAk, pd)):
+            records = fetch_notice(days=1, end_date="20260623", stock="600475")
+
+        self.assertEqual(records[0]["stock_code"], "600475")
+        self.assertEqual(records[0]["title"], "个股公告")
+
+    def test_fetch_notice_returns_empty_when_notice_source_misses_code_column(self) -> None:
+        class FakeAk:
+            @staticmethod
+            def stock_individual_notice_report(**_kwargs):  # noqa: ANN003
+                raise KeyError("代码")
+
+            @staticmethod
+            def stock_notice_report(**_kwargs):  # noqa: ANN003
+                raise KeyError("代码")
+
+        with patch("ashare_data_provider.events._load_akshare", return_value=(FakeAk, pd)):
+            records = fetch_notice(days=1, end_date="20260623", stock="600475")
+
+        self.assertEqual(records, [])
 
     def test_prepare_forecast_filters_stock_keyword_and_sorts(self) -> None:
         df = pd.DataFrame(

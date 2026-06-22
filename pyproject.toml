@@ -27,4 +27,11 @@ ashare = "ashare_data_provider.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ashare_data_provider = ["interfaces.json", "api_defaults.json", "api_schemas.json", "known_issues.json", "recipes.json"]
+ashare_data_provider = [
+  "interfaces.json",
+  "api_defaults.json",
+  "api_schemas.json",
+  "known_issues.json",
+  "recipes.json",
+  "source_policy.json",
+]

@@ -45,7 +45,10 @@ from .recipes import (
     load_recipes,
 )
 from .registry import InterfaceEntry, InterfaceRegistry, load_registry
+from .research_context import build_research_context
+from .research_summary import build_research_summary, load_research_context, render_research_summary_markdown
 from .schemas import ApiParameter, ApiSchema, SchemaError, get_api_schema, load_api_schemas
+from .source_policy import blocked_tushare_apis, load_source_policy, resolve_gap_sources
 
 __all__ = [
     "ApiParameter",
@@ -73,6 +76,9 @@ __all__ = [
     "TushareUnknownInterfaceError",
     "auto_periods",
     "build_news_records",
+    "build_research_context",
+    "build_research_summary",
+    "blocked_tushare_apis",
     "crawl_tushare_news",
     "default_fields",
     "default_recipe_params",
@@ -84,6 +90,8 @@ __all__ = [
     "load_api_schemas",
     "load_recipes",
     "load_registry",
+    "load_research_context",
+    "load_source_policy",
     "merge_news_date_partitions",
     "news_date_partition_path",
     "news_record_date",
@@ -92,4 +100,6 @@ __all__ = [
     "partition_news_records_by_date",
     "parse_news_page",
     "read_news_date_partitions",
+    "render_research_summary_markdown",
+    "resolve_gap_sources",
 ]
