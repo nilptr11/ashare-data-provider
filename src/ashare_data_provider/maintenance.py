@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time as datetime_time, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
@@ -50,6 +50,8 @@ QUALITY_RETRYABLE = {
     QUALITY_STALE_DATA,
     QUALITY_PAGINATION_LIMIT,
 }
+LATEST_ONLY_GROUPS = {"membership", "hot_rank", "northbound"}
+DAILY_COMPLETION_CUTOFF = datetime_time(20, 0)
 
 
 class MaintenanceError(RuntimeError):
@@ -521,6 +523,20 @@ def default_dataset_specs() -> tuple[DatasetSpec, ...]:
             min_rows=3000,
         ),
         DatasetSpec(
+            name="stock_hsgt",
+            group="northbound",
+            api_name="stock_hsgt",
+            title="沪深港通股票列表",
+            min_profile="standard",
+            maintenance_kind="trade_date",
+            date_param="trade_date",
+            variants=(
+                _variant("hk_sh", {"type": "HK_SH"}),
+                _variant("hk_sz", {"type": "HK_SZ"}),
+            ),
+            empty_policy=EMPTY_FORBID,
+        ),
+        DatasetSpec(
             name="index_classify",
             group="membership",
             api_name="index_classify",
@@ -849,6 +865,32 @@ def default_dataset_specs() -> tuple[DatasetSpec, ...]:
             required_columns=("trade_date",),
         ),
         DatasetSpec(
+            name="moneyflow_hsgt",
+            group="northbound",
+            api_name="moneyflow_hsgt",
+            title="沪深港通资金流向",
+            min_profile="standard",
+            maintenance_kind="trade_date",
+            date_param="trade_date",
+            empty_policy=EMPTY_RETRY_AFTER_LAG,
+            required_columns=("trade_date",),
+        ),
+        DatasetSpec(
+            name="hsgt_top10",
+            group="northbound",
+            api_name="hsgt_top10",
+            title="沪深股通十大成交股",
+            min_profile="standard",
+            maintenance_kind="trade_date",
+            date_param="trade_date",
+            variants=(
+                _variant("hgt", {"market_type": "1"}),
+                _variant("sgt", {"market_type": "3"}),
+            ),
+            empty_policy=EMPTY_RETRY_AFTER_LAG,
+            required_columns=("ts_code", "trade_date"),
+        ),
+        DatasetSpec(
             name="margin_detail",
             group="leverage",
             api_name="margin_detail",
@@ -904,6 +946,36 @@ def default_dataset_specs() -> tuple[DatasetSpec, ...]:
             empty_policy=EMPTY_RETRY_AFTER_LAG,
         ),
         DatasetSpec(
+            name="ths_hot",
+            group="hot_rank",
+            api_name="ths_hot",
+            title="同花顺热榜",
+            min_profile="full",
+            maintenance_kind="trade_date",
+            date_param="trade_date",
+            variants=(
+                _variant("hot_stock", {"market": "热股"}),
+                _variant("concept", {"market": "概念板块"}),
+            ),
+            empty_policy=EMPTY_RETRY_AFTER_LAG,
+            required_columns=("ts_code", "trade_date"),
+        ),
+        DatasetSpec(
+            name="dc_hot",
+            group="hot_rank",
+            api_name="dc_hot",
+            title="东方财富热榜",
+            min_profile="full",
+            maintenance_kind="trade_date",
+            date_param="trade_date",
+            variants=(
+                _variant("popularity", {"market": "A股市场", "hot_type": "人气榜"}),
+                _variant("rising", {"market": "A股市场", "hot_type": "飙升榜"}),
+            ),
+            empty_policy=EMPTY_RETRY_AFTER_LAG,
+            required_columns=("ts_code", "trade_date"),
+        ),
+        DatasetSpec(
             name="limit_step",
             group="short_term",
             api_name="limit_step",
@@ -942,6 +1014,32 @@ def default_dataset_specs() -> tuple[DatasetSpec, ...]:
             maintenance_kind="trade_date",
             date_param="trade_date",
             empty_policy=EMPTY_RETRY_AFTER_LAG,
+        ),
+        DatasetSpec(
+            name="cyq_perf",
+            group="chips",
+            api_name="cyq_perf",
+            title="筹码胜率",
+            min_profile="full",
+            maintenance_kind="stock_pool_daily",
+            date_param="trade_date",
+            requires_stock_pool=True,
+            empty_policy=EMPTY_ALLOW,
+            required_columns=("ts_code", "trade_date"),
+            unique_key=("ts_code", "trade_date"),
+        ),
+        DatasetSpec(
+            name="cyq_chips",
+            group="chips",
+            api_name="cyq_chips",
+            title="筹码分布",
+            min_profile="full",
+            maintenance_kind="stock_pool_daily",
+            date_param="trade_date",
+            requires_stock_pool=True,
+            empty_policy=EMPTY_ALLOW,
+            required_columns=("ts_code", "trade_date", "price", "percent"),
+            unique_key=("ts_code", "trade_date", "price"),
         ),
         DatasetSpec(
             name="income",
@@ -1356,6 +1454,10 @@ def _smoke_params_for(spec: DatasetSpec) -> dict[str, Any]:
     }
     if spec.api_name in smoke_driver_codes:
         defaults.setdefault(spec.driver_code_param, smoke_driver_codes[spec.api_name])
+    if spec.requires_stock_pool:
+        defaults.setdefault("ts_code", "000001.SZ")
+        defaults.setdefault("start_date", "20260423")
+        defaults.setdefault("end_date", "20260423")
     if spec.date_param and spec.date_param not in defaults:
         defaults[spec.date_param] = "20260423"
     if spec.maintenance_kind == "calendar":
@@ -1371,7 +1473,12 @@ def audit_access(
     smoke_unknown: bool = False,
     data_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    selected_specs = select_dataset_specs(profile=profile, specs=specs)
+    selected_specs = select_dataset_specs(
+        profile=profile,
+        specs=specs,
+        include_financials=True,
+        include_stock_pool_datasets=True,
+    )
     by_api = {spec.api_name: spec for spec in selected_specs}
     decisions: dict[str, AccessDecision] = {}
     results: list[dict[str, Any]] = []
@@ -1432,6 +1539,7 @@ def select_dataset_specs(
     include_groups: set[str] | None = None,
     exclude_groups: set[str] | None = None,
     include_financials: bool = False,
+    include_stock_pool_datasets: bool = False,
 ) -> tuple[DatasetSpec, ...]:
     if profile not in PROFILE_ORDER:
         raise MaintenanceError(f"未知 profile：{profile}，可选：basic/standard/full")
@@ -1444,8 +1552,12 @@ def select_dataset_specs(
             continue
         if exclude_groups and spec.group in exclude_groups:
             continue
-        if spec.requires_stock_pool and not include_financials:
-            continue
+        if spec.requires_stock_pool:
+            if spec.group == "financials":
+                if not include_financials:
+                    continue
+            elif not include_stock_pool_datasets:
+                continue
         selected.append(spec)
     return tuple(selected)
 
@@ -1458,6 +1570,7 @@ def build_maintenance_plan(
     include_groups: set[str] | None = None,
     exclude_groups: set[str] | None = None,
     include_financials: bool = False,
+    include_stock_pool_datasets: bool = False,
 ) -> MaintenancePlan:
     selected_specs = select_dataset_specs(
         profile=profile,
@@ -1465,6 +1578,7 @@ def build_maintenance_plan(
         include_groups=include_groups,
         exclude_groups=exclude_groups,
         include_financials=include_financials,
+        include_stock_pool_datasets=include_stock_pool_datasets,
     )
     catalog = access_catalog or {}
     datasets: list[PlanDataset] = []
@@ -1556,7 +1670,16 @@ def trade_dates_between(provider: AShareProvider, start_date: str, end_date: str
 
 
 def latest_completed_trade_date(provider: AShareProvider, as_of: str | date | datetime | None = None) -> str:
-    return provider.previous_trade_date(as_of=as_of)
+    if as_of is None:
+        anchor = datetime.now()
+    elif isinstance(as_of, datetime):
+        anchor = as_of
+    else:
+        anchor = datetime.combine(_parse_yyyymmdd(as_of), datetime_time.min)
+
+    if anchor.time() < DAILY_COMPLETION_CUTOFF:
+        return provider.previous_trade_date(as_of=anchor.date())
+    return provider.latest_trade_date(as_of=anchor.date())
 
 
 def _partition_for(spec: DatasetSpec, value: str) -> dict[str, Any]:
@@ -2018,6 +2141,61 @@ def _publish_financial_dataset(
     }
 
 
+def _publish_stock_pool_daily_dataset(
+    provider: AShareProvider,
+    mart: MartStore,
+    spec: DatasetSpec,
+    start_date: str,
+    end_date: str,
+    stock_pool: list[str] | tuple[str, ...] | None = None,
+    max_stocks: int | None = None,
+    quality_as_of: str | date | datetime | None = None,
+) -> dict[str, Any]:
+    try:
+        import pandas as pd
+    except ImportError as exc:  # pragma: no cover - pandas is a dependency
+        raise MaintenanceError("股票池日频数据落库需要 pandas") from exc
+
+    codes = _stock_pool_codes(provider, mart, end_date, stock_pool=stock_pool, max_stocks=max_stocks)
+    frames = []
+    errors: list[dict[str, Any]] = []
+    for ts_code in codes:
+        try:
+            result = provider.call(spec.api_name, params={"ts_code": ts_code, "start_date": start_date, "end_date": end_date}, fields=spec.fields)
+        except Exception as exc:  # noqa: BLE001 - report per stock
+            errors.append({"ts_code": ts_code, "error_type": type(exc).__name__, "error": str(exc)})
+            continue
+        frame = _to_frame(result)
+        if frame.empty:
+            continue
+        frames.append(frame)
+    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if combined.empty:
+        return {"requested_stocks": len(codes), "partitions_written": 0, "rows": 0, "errors": errors}
+    if "trade_date" not in combined.columns:
+        raise MaintenanceError(f"{spec.name} 返回数据缺少 trade_date")
+    rows = 0
+    written = 0
+    dedupe_columns = [column for column in spec.unique_key if column in combined.columns]
+    if not dedupe_columns:
+        dedupe_columns = [column for column in ["ts_code", "trade_date", "price"] if column in combined.columns]
+    for trade_date, group in combined.groupby(combined["trade_date"].astype(str)):
+        frame = group.reset_index(drop=True)
+        if dedupe_columns:
+            frame = frame.drop_duplicates(subset=dedupe_columns, keep="last")
+        quality = _quality_from_frame(spec, frame, trade_date, as_of=quality_as_of)
+        meta = mart.write(
+            spec.name,
+            {"trade_date": trade_date},
+            frame,
+            source={"kind": "tushare", "api_name": spec.api_name, "stock_pool": len(codes), "start_date": start_date, "end_date": end_date},
+            quality=quality,
+        )
+        rows += int(meta["rows"])
+        written += 1
+    return {"requested_stocks": len(codes), "partitions_written": written, "rows": rows, "errors": errors}
+
+
 def _recent_report_periods(end_date: str | date | datetime, periods: int = 8) -> list[str]:
     end_text = _format_yyyymmdd(end_date)
     end = _parse_yyyymmdd(end_text)
@@ -2303,6 +2481,33 @@ def run_backfill(
                     )
                 )
                 continue
+            if spec.maintenance_kind == "stock_pool_daily":
+                result = _publish_stock_pool_daily_dataset(
+                    provider,
+                    mart,
+                    spec,
+                    start_text,
+                    end_text,
+                    stock_pool=stock_pool,
+                    max_stocks=max_stocks,
+                    quality_as_of=quality_as_of,
+                )
+                errors = result.get("errors", [])
+                if result.get("partitions_written", 0):
+                    state["datasets"].setdefault(spec.name, {})["last_success_trade_date"] = end_text
+                results.append(
+                    _dataset_result(
+                        spec.name,
+                        spec.group,
+                        "success" if not errors else ("partial" if result.get("rows", 0) else "failed"),
+                        requested_stocks=result.get("requested_stocks", 0),
+                        partitions_written=result.get("partitions_written", 0),
+                        rows=result.get("rows", 0),
+                        errors=errors,
+                        elapsed_seconds=round(time.monotonic() - dataset_started, 3),
+                    )
+                )
+                continue
             if spec.maintenance_kind == "stock_pool_financial":
                 result = _publish_financial_dataset(
                     provider,
@@ -2432,7 +2637,7 @@ def run_backfill(
                 continue
             if spec.maintenance_kind in {"trade_date", "member_by_index_trade_date"}:
                 date_start_text = (kind_start_dates or {}).get("trade_date", start_text)
-                if spec.group == "membership":
+                if spec.group in LATEST_ONLY_GROUPS:
                     dates = [end_text]
                 elif date_start_text not in trade_dates_by_start:
                     trade_dates_by_start[date_start_text] = trade_dates_between(provider, date_start_text, end_text)
@@ -2591,7 +2796,8 @@ def run_daily(
     )
     report["as_of"] = _format_yyyymmdd(as_of or datetime.now())
     report["completed_trade_date"] = completed
-    report["target_trade_date_source"] = "explicit_end_date" if end_date is not None else "previous_trade_date"
+    report["target_trade_date_source"] = "explicit_end_date" if end_date is not None else "daily_completion_cutoff"
+    report["daily_completion_cutoff"] = DAILY_COMPLETION_CUTOFF.strftime("%H:%M")
     report["lookback_days"] = lookback_days
     report["event_lookback_days"] = event_lookback_days
     report["event_start_date"] = event_start_text
@@ -2704,10 +2910,13 @@ def run_check(
         spec = item.spec
         result: dict[str, Any] = {"name": spec.name, "group": spec.group, "maintenance_kind": spec.maintenance_kind}
         if spec.maintenance_kind in {"trade_date", "member_by_index_trade_date"}:
-            if spec.group == "membership":
+            if spec.group in LATEST_ONLY_GROUPS:
                 result.update(_partition_check_summary(mart, spec, [end_text], quality_as_of, "trade_date"))
-                result["check_strategy"] = "latest_mapping_only"
-                result["message"] = "题材/概念成分映射按目标交易日维护，不强制 120 日历史窗口。"
+                result["check_strategy"] = "latest_partition_only"
+                if spec.group == "membership":
+                    result["message"] = "题材/概念成分映射按目标交易日维护，不强制 120 日历史窗口。"
+                else:
+                    result["message"] = "热榜/沪深港通信号按目标交易日维护，不强制 120 日历史窗口。"
             else:
                 result.update(_partition_check_summary(mart, spec, dates, quality_as_of, "trade_date"))
         elif spec.maintenance_kind == "calendar":
@@ -2751,6 +2960,9 @@ def run_check(
         elif spec.maintenance_kind == "financial_disclosure_date":
             result.update(_financial_check_summary(mart, spec))
             result["message"] = "财报披露日期按最近报告期维护，不按交易日窗口维护。"
+        elif spec.maintenance_kind == "stock_pool_daily":
+            result.update(_partition_check_summary(mart, spec, dates, quality_as_of, spec.date_param or "trade_date"))
+            result["message"] = "股票池日频数据按显式股票池维护，不默认全市场日扫。"
         else:
             result.update({"status": "not_checked", "message": f"未知维护类型：{spec.maintenance_kind}"})
         datasets.append(result)

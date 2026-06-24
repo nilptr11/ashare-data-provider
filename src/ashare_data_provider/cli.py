@@ -148,6 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--group", action="append", default=[], help="只包含指定数据组，可重复传入")
     plan_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
     plan_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入计划")
+    plan_parser.add_argument("--include-stock-pool-datasets", action="store_true", help="把需要显式股票池的数据集纳入计划")
     plan_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
     daily_parser = maintain_subparsers.add_parser("daily", help="每日增量补缺并发布 canonical mart")
@@ -157,15 +158,16 @@ def build_parser() -> argparse.ArgumentParser:
     daily_parser.add_argument("--group", action="append", default=[], help="只维护指定数据组，可重复传入")
     daily_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
     daily_parser.add_argument("--as-of", help="分析/维护日期，支持 YYYYMMDD 或 YYYY-MM-DD，默认本地当天")
-    daily_parser.add_argument("--end-date", help="显式目标交易日/分区日期；不传则使用 as-of 的上一完整交易日")
+    daily_parser.add_argument("--end-date", help="显式目标交易日/分区日期；不传则按 as-of 和 20:00 数据完成线选择目标交易日")
     daily_parser.add_argument("--lookback-days", type=int, default=10, help="向前补缺的交易日自然日跨度，默认 10")
     daily_parser.add_argument("--event-lookback-days", type=int, default=30, help="事件公告向前补缺自然日跨度，默认 30")
     daily_parser.add_argument("--refresh", action="store_true", help="即使 mart 分区已存在也重新请求并发布")
     daily_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入计划")
-    daily_parser.add_argument("--stock", action="append", default=[], help="财务维护股票池，可重复传入；仅 --include-financials 时使用")
-    daily_parser.add_argument("--stock-pool-file", help="财务维护股票池文件，每行一个 ts_code；仅 --include-financials 时使用")
-    daily_parser.add_argument("--max-stocks", type=int, help="最多维护多少只股票的财务数据；仅 --include-financials 时使用")
-    daily_parser.add_argument("--all-stocks-financials", action="store_true", help="显式允许财务维护使用 stock_basic 全市场股票池")
+    daily_parser.add_argument("--include-stock-pool-datasets", action="store_true", help="把需要显式股票池的数据集纳入计划")
+    daily_parser.add_argument("--stock", action="append", default=[], help="股票池维护代码，可重复传入；用于 --include-financials 或 --include-stock-pool-datasets")
+    daily_parser.add_argument("--stock-pool-file", help="股票池维护文件，每行一个 ts_code；用于 --include-financials 或 --include-stock-pool-datasets")
+    daily_parser.add_argument("--max-stocks", type=int, help="最多维护多少只股票；用于 --include-financials 或 --include-stock-pool-datasets")
+    daily_parser.add_argument("--all-stocks-financials", action="store_true", help="显式允许财务维护使用 stock_basic 全市场股票池；不用于筹码等非财务股票池数据")
     daily_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
     backfill_parser = maintain_subparsers.add_parser("backfill", help="历史回填基础库并发布 canonical mart")
@@ -178,10 +180,11 @@ def build_parser() -> argparse.ArgumentParser:
     backfill_parser.add_argument("--end-date", required=True, help="结束日期，YYYYMMDD 或 YYYY-MM-DD")
     backfill_parser.add_argument("--refresh", action="store_true", help="即使 mart 分区已存在也重新请求并发布")
     backfill_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入计划")
-    backfill_parser.add_argument("--stock", action="append", default=[], help="财务回填股票池，可重复传入；仅 --include-financials 时使用")
-    backfill_parser.add_argument("--stock-pool-file", help="财务回填股票池文件，每行一个 ts_code；仅 --include-financials 时使用")
-    backfill_parser.add_argument("--max-stocks", type=int, help="最多回填多少只股票的财务数据；仅 --include-financials 时使用")
-    backfill_parser.add_argument("--all-stocks-financials", action="store_true", help="显式允许财务回填使用 stock_basic 全市场股票池")
+    backfill_parser.add_argument("--include-stock-pool-datasets", action="store_true", help="把需要显式股票池的数据集纳入计划")
+    backfill_parser.add_argument("--stock", action="append", default=[], help="股票池回填代码，可重复传入；用于 --include-financials 或 --include-stock-pool-datasets")
+    backfill_parser.add_argument("--stock-pool-file", help="股票池回填文件，每行一个 ts_code；用于 --include-financials 或 --include-stock-pool-datasets")
+    backfill_parser.add_argument("--max-stocks", type=int, help="最多回填多少只股票；用于 --include-financials 或 --include-stock-pool-datasets")
+    backfill_parser.add_argument("--all-stocks-financials", action="store_true", help="显式允许财务回填使用 stock_basic 全市场股票池；不用于筹码等非财务股票池数据")
     backfill_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
     check_parser = maintain_subparsers.add_parser("check", help="检查近 N 个交易日本地 mart 是否完整")
@@ -192,8 +195,9 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
     check_parser.add_argument("--end-date", required=True, help="结束日期，YYYYMMDD 或 YYYY-MM-DD")
     check_parser.add_argument("--trade-days", type=int, default=120, help="检查最近多少个交易日，默认 120")
-    check_parser.add_argument("--event-days", type=int, default=180, help="检查公告/业绩预告最近多少个自然日，默认 180")
+    check_parser.add_argument("--event-days", type=int, default=30, help="检查公告/业绩预告最近多少个自然日，默认 30")
     check_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入计划")
+    check_parser.add_argument("--include-stock-pool-datasets", action="store_true", help="把需要显式股票池的数据集纳入计划")
     check_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
     report_parser = maintain_subparsers.add_parser("report", help="生成每日维护运行报告，汇总覆盖率、缺口、空分区和可分析状态")
@@ -206,6 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("--trade-days", type=int, default=120, help="检查最近多少个交易日，默认 120")
     report_parser.add_argument("--event-days", type=int, default=30, help="检查公告/业绩预告最近多少个自然日，默认 30")
     report_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入报告计划")
+    report_parser.add_argument("--include-stock-pool-datasets", action="store_true", help="把需要显式股票池的数据集纳入报告计划")
     report_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
     analysis_parser = subparsers.add_parser("analysis", help="从本地 mart 生成面向分析框架/LLM 的 bundle")
@@ -213,7 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_parser = analysis_subparsers.add_parser("bundle", help="生成全市场分析 bundle")
     bundle_parser.add_argument("--as-of", required=True, help="分析日期，支持 YYYYMMDD 或 YYYY-MM-DD")
     bundle_parser.add_argument("--trade-days", type=int, default=120, help="读取最近多少个交易日，默认 120")
-    bundle_parser.add_argument("--event-days", type=int, default=180, help="读取公告/业绩预告最近多少个自然日，默认 180")
+    bundle_parser.add_argument("--event-days", type=int, default=30, help="读取公告/业绩预告最近多少个自然日，默认 30")
     bundle_parser.add_argument("--data-dir", help="数据根目录；默认读取 ASHARE_DATA_DIR 或 data")
     bundle_parser.add_argument("--env-file", default=".env", help="配置文件路径，默认自动查找 .env")
     bundle_parser.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN")
@@ -224,6 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_parser.add_argument("--group", action="append", default=[], help="只读取指定数据组，可重复传入")
     bundle_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
     bundle_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入 bundle 读取计划")
+    bundle_parser.add_argument("--include-stock-pool-datasets", action="store_true", help="把需要显式股票池的数据集纳入 bundle 读取计划")
     bundle_parser.add_argument("--include-raw-samples", action="store_true", help="在 bundle 中包含少量原始样本")
     bundle_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
@@ -477,6 +483,7 @@ def _maintenance_plan_from_args(args: argparse.Namespace, provider: AShareProvid
         include_groups=set(args.group) if getattr(args, "group", None) else None,
         exclude_groups=set(args.exclude_group) if getattr(args, "exclude_group", None) else None,
         include_financials=getattr(args, "include_financials", False),
+        include_stock_pool_datasets=getattr(args, "include_stock_pool_datasets", False),
     )
 
 
@@ -496,16 +503,19 @@ def _stock_pool_from_args(args: argparse.Namespace) -> list[str] | None:
 
 
 def _validate_financial_scope(args: argparse.Namespace, stock_pool: list[str] | None) -> None:
-    if not getattr(args, "include_financials", False):
+    include_financials = getattr(args, "include_financials", False)
+    include_stock_pool_datasets = getattr(args, "include_stock_pool_datasets", False)
+    if not (include_financials or include_stock_pool_datasets):
         return
     if getattr(args, "maintain_command", None) not in {"daily", "backfill"}:
         return
-    if stock_pool or getattr(args, "max_stocks", None) or getattr(args, "all_stocks_financials", False):
+    if stock_pool or getattr(args, "max_stocks", None):
         return
-    raise MaintenanceError(
-        "启用 --include-financials 时必须显式提供 --stock/--stock-pool-file/--max-stocks，"
-        "或使用 --all-stocks-financials 明确允许全市场财务维护。"
-    )
+    if include_stock_pool_datasets:
+        raise MaintenanceError("启用非财务股票池数据集时必须显式提供 --stock/--stock-pool-file/--max-stocks。")
+    if include_financials and getattr(args, "all_stocks_financials", False):
+        return
+    raise MaintenanceError("启用财务数据集时必须显式提供 --stock/--stock-pool-file/--max-stocks，或使用 --all-stocks-financials 明确允许全市场财务维护。")
 
 
 def _handle_maintain(args: argparse.Namespace) -> int:

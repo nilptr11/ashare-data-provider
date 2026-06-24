@@ -395,6 +395,28 @@ def _trading_features(top_list: Any, margin_detail: Any, kpl_list: Any, limit_li
     }
 
 
+def _hot_rank_features(ths_hot: Any, dc_hot: Any) -> dict[str, Any]:
+    return {
+        "ths_hot_sample": [_clean_value(item) for item in _records(ths_hot, limit=50)],
+        "dc_hot_sample": [_clean_value(item) for item in _records(dc_hot, limit=50)],
+    }
+
+
+def _northbound_features(moneyflow_hsgt: Any, hsgt_top10: Any, stock_hsgt: Any) -> dict[str, Any]:
+    return {
+        "moneyflow_hsgt_sample": [_clean_value(item) for item in _records(moneyflow_hsgt, limit=20)],
+        "hsgt_top10_sample": [_clean_value(item) for item in _records(hsgt_top10, limit=50)],
+        "stock_hsgt_sample": [_clean_value(item) for item in _records(stock_hsgt, limit=50)],
+    }
+
+
+def _chips_features(cyq_perf: Any, cyq_chips: Any) -> dict[str, Any]:
+    return {
+        "cyq_perf_sample": [_clean_value(item) for item in _records(cyq_perf, limit=50)],
+        "cyq_chips_sample": [_clean_value(item) for item in _records(cyq_chips, limit=50)],
+    }
+
+
 def _membership_features(frames: dict[str, Any], partition_values: dict[str, str | None]) -> dict[str, Any]:
     member_datasets = [
         "index_member_all",
@@ -528,6 +550,13 @@ def build_market_analysis_bundle(
     margin_detail, margin_detail_exists = _read_today_if_active(mart, active, "margin_detail", completed)
     kpl_list, kpl_list_exists = _read_today_if_active(mart, active, "kpl_list", completed)
     limit_list_ths, limit_list_ths_exists = _read_today_if_active(mart, active, "limit_list_ths", completed)
+    ths_hot, ths_hot_exists = _read_today_if_active(mart, active, "ths_hot", completed)
+    dc_hot, dc_hot_exists = _read_today_if_active(mart, active, "dc_hot", completed)
+    moneyflow_hsgt, moneyflow_hsgt_exists = _read_today_if_active(mart, active, "moneyflow_hsgt", completed)
+    hsgt_top10, hsgt_top10_exists = _read_today_if_active(mart, active, "hsgt_top10", completed)
+    stock_hsgt, stock_hsgt_exists = _read_today_if_active(mart, active, "stock_hsgt", completed)
+    cyq_perf, cyq_perf_exists = _read_today_if_active(mart, active, "cyq_perf", completed)
+    cyq_chips, cyq_chips_exists = _read_today_if_active(mart, active, "cyq_chips", completed)
     index_classify, index_classify_exists, index_classify_partition = _read_latest_partition_dataset(mart, active, "index_classify", "snapshot_date")
     index_member_all, index_member_all_exists, index_member_all_partition = _read_latest_partition_dataset(mart, active, "index_member_all", "snapshot_date")
     ci_index_member, ci_index_member_exists, ci_index_member_partition = _read_latest_partition_dataset(mart, active, "ci_index_member", "snapshot_date")
@@ -571,6 +600,13 @@ def build_market_analysis_bundle(
         ("margin_detail", margin_detail_exists),
         ("kpl_list", kpl_list_exists),
         ("limit_list_ths", limit_list_ths_exists),
+        ("ths_hot", ths_hot_exists),
+        ("dc_hot", dc_hot_exists),
+        ("moneyflow_hsgt", moneyflow_hsgt_exists),
+        ("hsgt_top10", hsgt_top10_exists),
+        ("stock_hsgt", stock_hsgt_exists),
+        ("cyq_perf", cyq_perf_exists),
+        ("cyq_chips", cyq_chips_exists),
         ("dc_index", dc_index_exists),
         ("tdx_index", tdx_index_exists),
         ("dc_member", dc_member_exists),
@@ -637,6 +673,13 @@ def build_market_analysis_bundle(
         "margin_detail": margin_detail,
         "kpl_list": kpl_list,
         "limit_list_ths": limit_list_ths,
+        "ths_hot": ths_hot,
+        "dc_hot": dc_hot,
+        "moneyflow_hsgt": moneyflow_hsgt,
+        "hsgt_top10": hsgt_top10,
+        "stock_hsgt": stock_hsgt,
+        "cyq_perf": cyq_perf,
+        "cyq_chips": cyq_chips,
         "index_classify": index_classify,
         "index_member_all": index_member_all,
         "ci_index_member": ci_index_member,
@@ -709,6 +752,9 @@ def build_market_analysis_bundle(
             ),
             "limit_pool": _limit_features(limit_pool, limit_step, concept_strength),
             "trading": _trading_features(top_list, margin_detail, kpl_list, limit_list_ths),
+            "hot_rank": _hot_rank_features(ths_hot, dc_hot),
+            "northbound": _northbound_features(moneyflow_hsgt, hsgt_top10, stock_hsgt),
+            "chips": _chips_features(cyq_perf, cyq_chips),
             "membership": _membership_features(
                 {
                     name: frame
@@ -787,6 +833,13 @@ def build_market_analysis_bundle(
             "a_stock_notice",
             "earnings_forecast",
             "event_news",
+            "ths_hot",
+            "dc_hot",
+            "moneyflow_hsgt",
+            "hsgt_top10",
+            "stock_hsgt",
+            "cyq_perf",
+            "cyq_chips",
             "balancesheet",
             "express",
             "dividend",

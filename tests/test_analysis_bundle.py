@@ -100,6 +100,9 @@ class AnalysisBundleTest(unittest.TestCase):
             mart.write("moneyflow_ind_ths", {"trade_date": "20260623"}, pd.DataFrame([{"name": "银行", "net_amount": 10.0}]))
             mart.write("moneyflow_ind_dc", {"trade_date": "20260623"}, pd.DataFrame([{"name": "银行", "net_amount": 11.0}]))
             mart.write("moneyflow_cnt_ths", {"trade_date": "20260623"}, pd.DataFrame([{"name": "大金融", "net_amount": 20.0}]))
+            mart.write("moneyflow_hsgt", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "north_money": "100.0"}]))
+            mart.write("hsgt_top10", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "market_type": 1}]))
+            mart.write("stock_hsgt", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "type": "HK_SZ"}]))
             mart.write("top_list", {"trade_date": "20260623"}, pd.DataFrame([{"ts_code": "000001.SZ", "net_amount": 100.0}]))
             mart.write("margin_detail", {"trade_date": "20260623"}, pd.DataFrame([{"ts_code": "000001.SZ", "rzye": 1000.0}]))
             mart.write(
@@ -117,6 +120,10 @@ class AnalysisBundleTest(unittest.TestCase):
             mart.write("limit_cpt_list", {"trade_date": "20260623"}, pd.DataFrame([{"name": "机器人", "limit_num": 5}]))
             mart.write("kpl_list", {"trade_date": "20260623"}, pd.DataFrame([{"ts_code": "000001.SZ", "name": "平安银行"}]))
             mart.write("limit_list_ths", {"trade_date": "20260623"}, pd.DataFrame([{"ts_code": "000001.SZ", "name": "平安银行"}]))
+            mart.write("ths_hot", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "rank": 1}]))
+            mart.write("dc_hot", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "rank": 1}]))
+            mart.write("cyq_perf", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "winner_rate": 50.0}]))
+            mart.write("cyq_chips", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "price": 10.0, "percent": 1.0}]))
             mart.write("index_classify", {"snapshot_date": "20260623"}, pd.DataFrame([{"index_code": "801780.SI", "industry_name": "银行"}]))
             mart.write(
                 "index_member_all",
@@ -176,6 +183,9 @@ class AnalysisBundleTest(unittest.TestCase):
                 "moneyflow_ind_ths",
                 "moneyflow_ind_dc",
                 "moneyflow_cnt_ths",
+                "moneyflow_hsgt",
+                "hsgt_top10",
+                "stock_hsgt",
                 "top_list",
                 "margin_detail",
                 "limit_list_d",
@@ -183,6 +193,10 @@ class AnalysisBundleTest(unittest.TestCase):
                 "limit_cpt_list",
                 "kpl_list",
                 "limit_list_ths",
+                "ths_hot",
+                "dc_hot",
+                "cyq_perf",
+                "cyq_chips",
                 "index_classify",
                 "index_member_all",
                 "ths_member",
@@ -204,6 +218,9 @@ class AnalysisBundleTest(unittest.TestCase):
         self.assertEqual(bundle["features"]["identity"]["summary"]["industry_count"], 1)
         self.assertIn("moneyflow_dc", bundle["features"]["moneyflow"]["stock_top_by_source"])
         self.assertIn("moneyflow_ind_dc", bundle["features"]["moneyflow"]["industry_sample_by_source"])
+        self.assertEqual(bundle["features"]["northbound"]["moneyflow_hsgt_sample"][0]["north_money"], "100.0")
+        self.assertEqual(bundle["features"]["hot_rank"]["ths_hot_sample"][0]["rank"], 1)
+        self.assertEqual(bundle["features"]["chips"]["cyq_perf_sample"][0]["winner_rate"], 50.0)
         self.assertEqual(bundle["features"]["limit_pool"]["stats"]["limit_up"], 1)
         self.assertEqual(bundle["features"]["limit_pool"]["stats"]["limit_down"], 1)
         self.assertEqual(bundle["features"]["limit_pool"]["stats"]["broken_limit"], 1)

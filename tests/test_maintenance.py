@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 import pandas as pd
@@ -15,6 +16,7 @@ from ashare_data_provider.maintenance import (
     MartStore,
     PlanDataset,
     RequestVariant,
+    audit_access,
     build_maintenance_plan,
     run_backfill,
     run_check,
@@ -74,6 +76,13 @@ class FakeCaller:
             )
         if api_name == "moneyflow_dc":
             return pd.DataFrame(columns=["trade_date", "ts_code", "net_amount"])
+        if api_name == "cyq_perf":
+            return pd.DataFrame(
+                [
+                    {"ts_code": params["ts_code"], "trade_date": params["start_date"], "winner_rate": 50.0},
+                    {"ts_code": params["ts_code"], "trade_date": params["end_date"], "winner_rate": 51.0},
+                ]
+            )
         raise AssertionError(f"unexpected api: {api_name}")
 
 
@@ -143,6 +152,67 @@ class MaintenanceTest(unittest.TestCase):
         plan = build_maintenance_plan(provider, profile="basic", specs=specs, access_catalog=catalog)
 
         self.assertEqual([item.spec.name for item in plan.datasets], ["daily"])
+
+    def test_access_audit_includes_stock_pool_datasets(self) -> None:
+        specs = (
+            DatasetSpec(
+                "cyq_perf",
+                "chips",
+                "cyq_perf",
+                "筹码胜率",
+                "full",
+                "stock_pool_daily",
+                date_param="trade_date",
+                requires_stock_pool=True,
+            ),
+        )
+        caller = FakeCaller()
+        provider = make_provider(make_registry({"api_name": "cyq_perf", "eligibility": "unknown"}), caller=caller)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = audit_access(provider, profile="full", specs=specs, smoke_unknown=True, data_dir=tmp_dir)
+
+        self.assertEqual(payload["interfaces"][0]["api_name"], "cyq_perf")
+        self.assertEqual(payload["interfaces"][0]["access"], ACCESS_ALLOWED)
+        self.assertEqual(caller.calls[0]["params"]["ts_code"], "000001.SZ")
+        self.assertEqual(caller.calls[0]["params"]["start_date"], "20260423")
+        self.assertEqual(caller.calls[0]["params"]["end_date"], "20260423")
+
+    def test_stock_pool_dataset_flag_does_not_include_financials(self) -> None:
+        specs = (
+            DatasetSpec(
+                "income",
+                "financials",
+                "income",
+                "利润表",
+                "full",
+                "stock_pool_financial",
+                date_param="period",
+                requires_stock_pool=True,
+            ),
+            DatasetSpec(
+                "cyq_perf",
+                "chips",
+                "cyq_perf",
+                "筹码胜率",
+                "full",
+                "stock_pool_daily",
+                date_param="trade_date",
+                requires_stock_pool=True,
+            ),
+        )
+        provider = make_provider(
+            make_registry(
+                {"api_name": "income", "eligibility": "points_ok"},
+                {"api_name": "cyq_perf", "eligibility": "points_ok"},
+            )
+        )
+
+        chips_plan = build_maintenance_plan(provider, profile="full", specs=specs, include_stock_pool_datasets=True)
+        financial_plan = build_maintenance_plan(provider, profile="full", specs=specs, include_financials=True)
+
+        self.assertEqual([item.spec.name for item in chips_plan.datasets], ["cyq_perf"])
+        self.assertEqual([item.spec.name for item in financial_plan.datasets], ["income"])
 
     def test_plan_filters_member_dataset_when_driver_is_not_allowed(self) -> None:
         specs = (
@@ -252,6 +322,37 @@ class MaintenanceTest(unittest.TestCase):
         self.assertEqual(frame["revenue"].tolist(), [100.0])
         self.assertEqual(caller.calls[0]["api_name"], "income")
         self.assertEqual(caller.calls[0]["params"]["ts_code"], "000001.SZ")
+
+    def test_stock_pool_daily_backfill_partitions_by_trade_date(self) -> None:
+        specs = (
+            DatasetSpec(
+                "cyq_perf",
+                "chips",
+                "cyq_perf",
+                "筹码胜率",
+                "full",
+                "stock_pool_daily",
+                date_param="trade_date",
+                requires_stock_pool=True,
+                unique_key=("ts_code", "trade_date"),
+            ),
+        )
+        caller = FakeCaller()
+        provider = make_provider(make_registry({"api_name": "cyq_perf", "eligibility": "points_ok"}), caller=caller)
+        plan = build_maintenance_plan(provider, profile="full", specs=specs, include_stock_pool_datasets=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report = run_backfill(provider, plan, "20260622", "20260623", data_dir=tmp_dir, stock_pool=["000001.SZ"])
+            mart = MartStore(data_dir=tmp_dir)
+            first = mart.read_dataset("cyq_perf", {"trade_date": "20260622"})
+            second = mart.read_dataset("cyq_perf", {"trade_date": "20260623"})
+
+        self.assertEqual(report["datasets"][0]["status"], "success")
+        self.assertEqual(report["datasets"][0]["partitions_written"], 2)
+        self.assertEqual(first["winner_rate"].tolist(), [50.0])
+        self.assertEqual(second["winner_rate"].tolist(), [51.0])
+        self.assertEqual(caller.calls[0]["params"]["start_date"], "20260622")
+        self.assertEqual(caller.calls[0]["params"]["end_date"], "20260623")
 
     def test_member_snapshot_backfill_uses_driver_codes(self) -> None:
         specs = (
@@ -707,6 +808,48 @@ class MaintenanceTest(unittest.TestCase):
         self.assertIn("20260624", daily_dates)
         self.assertEqual(report["completed_trade_date"], "20260624")
         self.assertEqual(report["target_trade_date_source"], "explicit_end_date")
+
+    def test_daily_defaults_to_previous_trade_date_before_evening_cutoff(self) -> None:
+        specs = (
+            DatasetSpec("daily", "stock_daily", "daily", "日线", "basic", "trade_date", date_param="trade_date"),
+        )
+        caller = FakeCaller()
+        provider = make_provider(
+            make_registry({"api_name": "daily", "eligibility": "points_ok"}, {"api_name": "trade_cal", "eligibility": "points_ok"}),
+            caller=caller,
+        )
+        plan = build_maintenance_plan(provider, profile="basic", specs=specs)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report = run_daily(provider, plan, as_of=datetime(2026, 6, 24, 19, 59), lookback_days=2, data_dir=tmp_dir)
+            mart = MartStore(data_dir=tmp_dir)
+
+            self.assertTrue(mart.exists("daily", {"trade_date": "20260623"}))
+            self.assertFalse(mart.exists("daily", {"trade_date": "20260624"}))
+
+        self.assertEqual(report["completed_trade_date"], "20260623")
+        self.assertEqual(report["target_trade_date_source"], "daily_completion_cutoff")
+        self.assertEqual(report["daily_completion_cutoff"], "20:00")
+
+    def test_daily_defaults_to_today_after_evening_cutoff_when_today_is_open(self) -> None:
+        specs = (
+            DatasetSpec("daily", "stock_daily", "daily", "日线", "basic", "trade_date", date_param="trade_date"),
+        )
+        caller = FakeCaller()
+        provider = make_provider(
+            make_registry({"api_name": "daily", "eligibility": "points_ok"}, {"api_name": "trade_cal", "eligibility": "points_ok"}),
+            caller=caller,
+        )
+        plan = build_maintenance_plan(provider, profile="basic", specs=specs)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report = run_daily(provider, plan, as_of=datetime(2026, 6, 24, 20, 0), lookback_days=2, data_dir=tmp_dir)
+            mart = MartStore(data_dir=tmp_dir)
+
+            self.assertTrue(mart.exists("daily", {"trade_date": "20260624"}))
+
+        self.assertEqual(report["completed_trade_date"], "20260624")
+        self.assertEqual(report["target_trade_date_source"], "daily_completion_cutoff")
 
     def test_backfill_drops_exact_duplicate_rows_before_writing_partition(self) -> None:
         specs = (
