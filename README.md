@@ -256,6 +256,14 @@ ashare analysis bundle \
 
 外部产业证据层不放进 A 股基础 mart。商品/材料价格、产能、库存、开工率、海外 AI capex、订单/招标、政策文件、行业研报和公司调研更适合单独建设 `evidence/industry` 层，并在分析时作为证据包和 A 股基础 bundle 组合读取。
 
+### LLM 数据使用指引
+
+LLM 使用本项目数据时，优先读已经生成的结构化产物，而不是现场拼零散接口。全市场分析优先使用 `ashare analysis bundle` 输出；个股研究优先使用 `research-context` 和 `research-summary` 输出；判断 Tushare 权限、替代源和外部证据边界时参考 `src/ashare_data_provider/source_policy.json`。
+
+行业特有证据不直接放进 A 股 mart。需要商品价格、产能、库存、开工率、订单、招标、海外 capex、政策和行业协会数据时，LLM 应先使用 `prompts/industry-evidence-prompt.md` 做受控现搜，并按 `references/industry-evidence-design.md` 的 evidence schema 输出。可用来源和 adapter 候选参考 `references/industry-source-registry.json`；AI 算力链和锂电链的试点指标/source map 参考 `references/industry-source-maps.json`。
+
+`industry-source-registry.json` 和 `industry-source-maps.json` 是研究/设计参考，不代表数据已经稳定入库。任何会进入打分、排序、回测或交易决策的数值证据，必须有 `source_url/published_at/query_time/confidence`，并优先来自官方、交易所、监管机构、公司披露或已 adapter 化来源；prompt 现搜结果默认只作为 evidence，不等同于生产级数据。
+
 ### A 股事件能力
 
 当前高层事件能力明确为三类：A 股公告、业绩预告、时讯。公告和业绩预告走 AKShare；Tushare `forecast` 与 `news` API 暂时不作为高层能力使用。时讯继续抓取登录后可见的 Tushare 资讯页，作为当前快讯替代源。

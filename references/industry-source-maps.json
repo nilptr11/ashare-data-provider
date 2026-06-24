@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "updated_at": "2026-06-24",
+  "purpose": "Pilot industry source maps for prompt-first industry evidence runs.",
+  "industries": [
+    {
+      "industry_id": "ai_infrastructure",
+      "display_name": "AI infrastructure / compute chain",
+      "pilot_question": "For 2026, are North American hyperscaler capex plans still being revised upward, and what evidence links that spend to optical modules, servers, data centers, and networking equipment?",
+      "metrics": [
+        {
+          "metric_id": "hyperscaler_capex",
+          "topic": "capex",
+          "frequency": "quarterly",
+          "primary_sources": ["sec_edgar_apis", "company_ir_earnings_release", "company_ir_earnings_call_transcript"],
+          "prompt_role": "Extract company-specific capex guidance, actual quarterly capex, server/network/data-center allocation, and management commentary.",
+          "adapter_candidate": true,
+          "adapter_priority": "P0",
+          "notes": "SEC/company IR can be deterministic; supplier read-through remains prompt evidence."
+        },
+        {
+          "metric_id": "ai_revenue_or_run_rate",
+          "topic": "association_data",
+          "frequency": "quarterly",
+          "primary_sources": ["company_ir_earnings_call_transcript", "company_ir_earnings_release"],
+          "prompt_role": "Capture AI revenue run-rate, backlog, and capacity-constraint comments.",
+          "adapter_candidate": true,
+          "adapter_priority": "P1",
+          "notes": "Often appears in narrative transcript, so extraction should keep raw excerpts and source lines."
+        },
+        {
+          "metric_id": "server_networking_allocation",
+          "topic": "capex",
+          "frequency": "quarterly",
+          "primary_sources": ["company_ir_earnings_call_transcript"],
+          "prompt_role": "Extract split between servers, networking equipment, and data centers when disclosed.",
+          "adapter_candidate": true,
+          "adapter_priority": "P1",
+          "notes": "Alphabet disclosed server vs data-center/networking allocation in Q1 2026 call; similar disclosures are not guaranteed."
+        },
+        {
+          "metric_id": "optical_module_order_signal",
+          "topic": "order",
+          "frequency": "event",
+          "primary_sources": ["company_filing", "company_ir", "credible_news"],
+          "prompt_role": "Find supplier-level order, backlog, customer concentration, or demand commentary.",
+          "adapter_candidate": false,
+          "adapter_priority": "P2",
+          "notes": "Usually non-standard text. Keep as prompt evidence until repeat source patterns emerge."
+        },
+        {
+          "metric_id": "semiconductor_market_demand",
+          "topic": "association_data",
+          "frequency": "monthly_quarterly",
+          "primary_sources": ["sia_market_data", "wsts_market_data", "semi_equipment_market_data"],
+          "prompt_role": "Use association releases to cross-check AI hardware cycle and semiconductor equipment demand.",
+          "adapter_candidate": true,
+          "adapter_priority": "P1",
+          "notes": "Confirm public/free data availability before adapter work."
+        }
+      ],
+      "first_run_evidence": [
+        {
+          "claim": "Microsoft said AI business ARR surpassed $37 billion and grew 123% in FY26 Q3.",
+          "source_name": "Microsoft FY26 Q3 earnings call",
+          "source_url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q3",
+          "confidence": "high",
+          "why_it_matters": "Strong AI revenue supports continued AI infrastructure demand."
+        },
+        {
+          "claim": "Microsoft FY26 Q2 capex was $37.5 billion, roughly two thirds short-lived assets primarily GPUs and CPUs; demand continued to exceed supply.",
+          "source_name": "Microsoft FY26 Q2 earnings call",
+          "source_url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q2",
+          "confidence": "high",
+          "why_it_matters": "Direct demand signal for compute hardware and surrounding infrastructure."
+        },
+        {
+          "claim": "Alphabet Q1 2026 capex was $35.7 billion, mostly technical infrastructure; about 60% was servers and 40% data centers and networking equipment.",
+          "source_name": "Alphabet Q1 2026 earnings call",
+          "source_url": "https://abc.xyz/investor/events/event-details/2026/2026-Q1-Earnings-Call-2026-nW8kCrBAKS/default.aspx",
+          "confidence": "high",
+          "why_it_matters": "Explicit server/networking allocation supports supplier-chain read-through."
+        },
+        {
+          "claim": "Meta raised 2026 capex guidance to $125-145 billion, citing component pricing and data-center costs.",
+          "source_name": "Meta Q1 2026 SEC exhibit",
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026028364/meta-03312026xexhibit991.htm",
+          "confidence": "high",
+          "why_it_matters": "Capex guidance revision is direct evidence of larger AI/data-center buildout."
+        },
+        {
+          "claim": "Amazon said its expected 2026 AWS capex is backed by customer commitments and referenced approximately $200 billion of 2026 capex.",
+          "source_name": "Amazon 2025 Annual Report",
+          "source_url": "https://s2.q4cdn.com/299287126/files/doc_financials/2026/ar/Amazon-2025-Annual-Report.pdf",
+          "confidence": "high",
+          "why_it_matters": "Management links AI/cloud capex to customer demand, reducing risk that capex is purely speculative."
+        }
+      ],
+      "gaps": [
+        {
+          "missing": "Supplier-specific optical-module and server order values",
+          "reason": "non_standard_disclosure",
+          "suggested_source": "Supplier filings, IR transcripts, tender notices, and credible supply-chain news."
+        }
+      ]
+    },
+    {
+      "industry_id": "lithium_battery",
+      "display_name": "Lithium battery / energy storage chain",
+      "pilot_question": "Since 2026, do lithium carbonate inventory, energy-storage tenders, power-battery installation, and NEV sales support a demand recovery in the lithium battery chain?",
+      "metrics": [
+        {
+          "metric_id": "lithium_carbonate_warehouse_receipt",
+          "topic": "inventory",
+          "frequency": "daily",
+          "primary_sources": ["gfex_warehouse_receipts"],
+          "prompt_role": "Use exchange evidence to anchor lithium carbonate inventory or warehouse-receipt changes.",
+          "adapter_candidate": true,
+          "adapter_priority": "P0",
+          "notes": "Exchange data is a strong deterministic adapter candidate."
+        },
+        {
+          "metric_id": "lithium_carbonate_futures_price",
+          "topic": "price",
+          "frequency": "daily",
+          "primary_sources": ["gfex_daily_quotes"],
+          "prompt_role": "Use futures price as a public market proxy when high-quality spot prices are paid or unavailable.",
+          "adapter_candidate": true,
+          "adapter_priority": "P0",
+          "notes": "Spot prices from paid vendors should remain prompt/manual unless licensed."
+        },
+        {
+          "metric_id": "power_battery_installation",
+          "topic": "association_data",
+          "frequency": "monthly",
+          "primary_sources": ["battery_alliance_monthly_release"],
+          "prompt_role": "Find original power-battery installation releases and separate official source from reposts.",
+          "adapter_candidate": true,
+          "adapter_priority": "P1",
+          "notes": "Media reposts are medium confidence until original source path is verified."
+        },
+        {
+          "metric_id": "nev_sales",
+          "topic": "association_data",
+          "frequency": "monthly",
+          "primary_sources": ["caam_statistics", "auto_stats_statistics"],
+          "prompt_role": "Anchor battery demand with NEV production and sales.",
+          "adapter_candidate": true,
+          "adapter_priority": "P1",
+          "notes": "CAAM/statistics articles should be parsed only after format stability review."
+        },
+        {
+          "metric_id": "energy_storage_tender_award",
+          "topic": "tender",
+          "frequency": "event",
+          "primary_sources": ["ggzy_public_resource_transactions", "ggzy_data_service", "state_grid_procurement"],
+          "prompt_role": "Discover energy-storage EPC, cell framework purchase, and award signals; backtrack aggregators to official notice pages.",
+          "adapter_candidate": true,
+          "adapter_priority": "P0",
+          "notes": "Needs dedupe, project-size extraction, unit conversion, and notice-type classification."
+        },
+        {
+          "metric_id": "lithium_spot_price",
+          "topic": "price",
+          "frequency": "daily_weekly",
+          "primary_sources": ["paid_vendor_or_manual"],
+          "prompt_role": "Identify public snippets but avoid production numeric use without licensed source.",
+          "adapter_candidate": false,
+          "adapter_priority": "P2",
+          "notes": "High-quality spot sources are often SMM/Mysteel/Longzhong paid or semi-paid."
+        }
+      ],
+      "first_run_evidence": [
+        {
+          "claim": "GFEX publishes daily warehouse receipts and showed lithium carbonate subtotal values on its warehouse-receipt page.",
+          "source_name": "Guangzhou Futures Exchange warehouse receipts",
+          "source_url": "https://www.gfex.com.cn/gfex/cdrb/hqsj_tjsj.shtml",
+          "confidence": "high",
+          "why_it_matters": "Public exchange inventory proxy for lithium carbonate."
+        },
+        {
+          "claim": "GFEX lithium carbonate contract specs define the underlying, trading unit, and RMB/ton quotation unit.",
+          "source_name": "Guangzhou Futures Exchange lithium carbonate product page",
+          "source_url": "https://www.gfex.com.cn/gfex/tsl/sspz.shtml",
+          "confidence": "high",
+          "why_it_matters": "Supports unit normalization for price and inventory evidence."
+        },
+        {
+          "claim": "A media repost of power-battery alliance data reported May 2026 domestic power-battery installation of 71.9 GWh, up 25.9% year over year and 15.2% month over month.",
+          "source_name": "Sohu repost of power-battery alliance data",
+          "source_url": "https://www.sohu.com/a/1035116702_114986",
+          "confidence": "medium",
+          "why_it_matters": "Demand-side improvement signal, but original source should be located before production use."
+        },
+        {
+          "claim": "Auto Statistics Information Network published April 2026 NEV production and sales totals and year-to-date totals.",
+          "source_name": "Auto Statistics Information Network",
+          "source_url": "https://www.auto-stats.org.cn/ReadArticle.asp?NewsID=11396",
+          "confidence": "medium_high",
+          "why_it_matters": "Monthly NEV demand anchor for battery-chain analysis."
+        },
+        {
+          "claim": "National public-resource transaction platforms provide searchable tender and award information across government procurement and engineering projects.",
+          "source_name": "National Public Resource Transaction Platform",
+          "source_url": "https://www.ggzy.gov.cn/",
+          "confidence": "high",
+          "why_it_matters": "Can support energy-storage tender and award evidence when project notices are matched."
+        }
+      ],
+      "gaps": [
+        {
+          "missing": "High-quality free lithium carbonate spot price",
+          "reason": "paid_source",
+          "suggested_source": "SMM, Mysteel, Longzhong, or licensed vendor feed."
+        },
+        {
+          "missing": "Stable original source for monthly power-battery installation data",
+          "reason": "requires_manual_review",
+          "suggested_source": "China Automotive Power Battery Industry Innovation Alliance original publication path."
+        }
+      ]
+    }
+  ]
+}
