@@ -12,6 +12,7 @@ from ashare_data_provider.events import (
     fetch_notice,
     prepare_forecast,
     prepare_notice,
+    run_akshare,
     validate_period,
 )
 
@@ -24,6 +25,14 @@ class EventsTest(unittest.TestCase):
         self.assertEqual(validate_period("20260331"), "20260331")
         with self.assertRaises(AStockEventError):
             validate_period("20260228")
+
+    def test_run_akshare_injects_requests_timeout(self) -> None:
+        import requests
+
+        with patch("requests.sessions.Session.request", return_value=object()) as request:
+            run_akshare(lambda: requests.get("https://example.com"), timeout=7)
+
+        self.assertEqual(request.call_args.kwargs["timeout"], 7)
 
     def test_prepare_notice_filters_keyword_and_sorts_by_date(self) -> None:
         df = pd.DataFrame(

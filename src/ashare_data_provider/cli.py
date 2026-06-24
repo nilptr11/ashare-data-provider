@@ -22,6 +22,18 @@ from .news import (
 )
 from .output import emit, limit_rows, render
 from .params import merge_params
+from .analysis_bundle import build_market_analysis_bundle
+from .maintenance import (
+    MaintenanceError,
+    audit_access,
+    build_maintenance_plan,
+    load_access_catalog,
+    require_plan_has_datasets,
+    run_backfill,
+    run_check,
+    run_daily,
+    run_status_report,
+)
 from .provider import (
     TushareInterfaceSelectionError,
     TusharePermissionError,
@@ -112,6 +124,108 @@ def build_parser() -> argparse.ArgumentParser:
     summary_parser.add_argument("--max-events", type=int, default=10, help="最多保留多少条事件线索，默认 10")
     summary_parser.add_argument("--max-segments", type=int, default=12, help="最多保留多少个主营分部，默认 12")
     summary_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    maintain_parser = subparsers.add_parser("maintain", help="维护长期基础库、权限目录和分析 mart")
+    maintain_subparsers = maintain_parser.add_subparsers(dest="maintain_command", required=True)
+
+    def add_provider_arguments(target_parser: argparse.ArgumentParser) -> None:
+        target_parser.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN")
+        target_parser.add_argument("--proxy-url", help="Tushare API 代理地址；默认读取 TUSHARE_PROXY_URL")
+        target_parser.add_argument("--env-file", default=".env", help="配置文件路径，默认自动查找 .env")
+        target_parser.add_argument("--current-points", type=int, help="当前账号积分；默认读取 TUSHARE_POINTS")
+        target_parser.add_argument("--data-dir", help="数据根目录；默认读取 ASHARE_DATA_DIR 或 data")
+
+    access_parser = maintain_subparsers.add_parser("access-audit", help="生成权限目录，没有权限的接口不进入维护计划")
+    add_provider_arguments(access_parser)
+    access_parser.add_argument("--profile", choices=["basic", "standard", "full"], default="full")
+    access_parser.add_argument("--smoke-unknown", action="store_true", help="对 unknown 权限接口做最小调用验证")
+    access_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    plan_parser = maintain_subparsers.add_parser("plan", help="输出权限过滤后的可执行维护计划")
+    add_provider_arguments(plan_parser)
+    plan_parser.add_argument("--profile", choices=["basic", "standard", "full"], default="full")
+    plan_parser.add_argument("--access-catalog", help="权限目录路径，默认 data/maintenance/access.json")
+    plan_parser.add_argument("--group", action="append", default=[], help="只包含指定数据组，可重复传入")
+    plan_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
+    plan_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入计划")
+    plan_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    daily_parser = maintain_subparsers.add_parser("daily", help="每日增量补缺并发布 canonical mart")
+    add_provider_arguments(daily_parser)
+    daily_parser.add_argument("--profile", choices=["basic", "standard", "full"], default="full")
+    daily_parser.add_argument("--access-catalog", help="权限目录路径，默认 data/maintenance/access.json")
+    daily_parser.add_argument("--group", action="append", default=[], help="只维护指定数据组，可重复传入")
+    daily_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
+    daily_parser.add_argument("--as-of", help="分析/维护日期，支持 YYYYMMDD 或 YYYY-MM-DD，默认本地当天")
+    daily_parser.add_argument("--end-date", help="显式目标交易日/分区日期；不传则使用 as-of 的上一完整交易日")
+    daily_parser.add_argument("--lookback-days", type=int, default=10, help="向前补缺的交易日自然日跨度，默认 10")
+    daily_parser.add_argument("--event-lookback-days", type=int, default=30, help="事件公告向前补缺自然日跨度，默认 30")
+    daily_parser.add_argument("--refresh", action="store_true", help="即使 mart 分区已存在也重新请求并发布")
+    daily_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入计划")
+    daily_parser.add_argument("--stock", action="append", default=[], help="财务维护股票池，可重复传入；仅 --include-financials 时使用")
+    daily_parser.add_argument("--stock-pool-file", help="财务维护股票池文件，每行一个 ts_code；仅 --include-financials 时使用")
+    daily_parser.add_argument("--max-stocks", type=int, help="最多维护多少只股票的财务数据；仅 --include-financials 时使用")
+    daily_parser.add_argument("--all-stocks-financials", action="store_true", help="显式允许财务维护使用 stock_basic 全市场股票池")
+    daily_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    backfill_parser = maintain_subparsers.add_parser("backfill", help="历史回填基础库并发布 canonical mart")
+    add_provider_arguments(backfill_parser)
+    backfill_parser.add_argument("--profile", choices=["basic", "standard", "full"], default="full")
+    backfill_parser.add_argument("--access-catalog", help="权限目录路径，默认 data/maintenance/access.json")
+    backfill_parser.add_argument("--group", action="append", default=[], help="只回填指定数据组，可重复传入")
+    backfill_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
+    backfill_parser.add_argument("--start-date", required=True, help="开始日期，YYYYMMDD 或 YYYY-MM-DD")
+    backfill_parser.add_argument("--end-date", required=True, help="结束日期，YYYYMMDD 或 YYYY-MM-DD")
+    backfill_parser.add_argument("--refresh", action="store_true", help="即使 mart 分区已存在也重新请求并发布")
+    backfill_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入计划")
+    backfill_parser.add_argument("--stock", action="append", default=[], help="财务回填股票池，可重复传入；仅 --include-financials 时使用")
+    backfill_parser.add_argument("--stock-pool-file", help="财务回填股票池文件，每行一个 ts_code；仅 --include-financials 时使用")
+    backfill_parser.add_argument("--max-stocks", type=int, help="最多回填多少只股票的财务数据；仅 --include-financials 时使用")
+    backfill_parser.add_argument("--all-stocks-financials", action="store_true", help="显式允许财务回填使用 stock_basic 全市场股票池")
+    backfill_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    check_parser = maintain_subparsers.add_parser("check", help="检查近 N 个交易日本地 mart 是否完整")
+    add_provider_arguments(check_parser)
+    check_parser.add_argument("--profile", choices=["basic", "standard", "full"], default="full")
+    check_parser.add_argument("--access-catalog", help="权限目录路径，默认 data/maintenance/access.json")
+    check_parser.add_argument("--group", action="append", default=[], help="只检查指定数据组，可重复传入")
+    check_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
+    check_parser.add_argument("--end-date", required=True, help="结束日期，YYYYMMDD 或 YYYY-MM-DD")
+    check_parser.add_argument("--trade-days", type=int, default=120, help="检查最近多少个交易日，默认 120")
+    check_parser.add_argument("--event-days", type=int, default=180, help="检查公告/业绩预告最近多少个自然日，默认 180")
+    check_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入计划")
+    check_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    report_parser = maintain_subparsers.add_parser("report", help="生成每日维护运行报告，汇总覆盖率、缺口、空分区和可分析状态")
+    add_provider_arguments(report_parser)
+    report_parser.add_argument("--profile", choices=["basic", "standard", "full"], default="full")
+    report_parser.add_argument("--access-catalog", help="权限目录路径，默认 data/maintenance/access.json")
+    report_parser.add_argument("--group", action="append", default=[], help="只报告指定数据组，可重复传入")
+    report_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
+    report_parser.add_argument("--end-date", required=True, help="报告目标日期，YYYYMMDD 或 YYYY-MM-DD")
+    report_parser.add_argument("--trade-days", type=int, default=120, help="检查最近多少个交易日，默认 120")
+    report_parser.add_argument("--event-days", type=int, default=30, help="检查公告/业绩预告最近多少个自然日，默认 30")
+    report_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入报告计划")
+    report_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
+
+    analysis_parser = subparsers.add_parser("analysis", help="从本地 mart 生成面向分析框架/LLM 的 bundle")
+    analysis_subparsers = analysis_parser.add_subparsers(dest="analysis_command", required=True)
+    bundle_parser = analysis_subparsers.add_parser("bundle", help="生成全市场分析 bundle")
+    bundle_parser.add_argument("--as-of", required=True, help="分析日期，支持 YYYYMMDD 或 YYYY-MM-DD")
+    bundle_parser.add_argument("--trade-days", type=int, default=120, help="读取最近多少个交易日，默认 120")
+    bundle_parser.add_argument("--event-days", type=int, default=180, help="读取公告/业绩预告最近多少个自然日，默认 180")
+    bundle_parser.add_argument("--data-dir", help="数据根目录；默认读取 ASHARE_DATA_DIR 或 data")
+    bundle_parser.add_argument("--env-file", default=".env", help="配置文件路径，默认自动查找 .env")
+    bundle_parser.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN")
+    bundle_parser.add_argument("--proxy-url", help="Tushare API 代理地址；默认读取 TUSHARE_PROXY_URL")
+    bundle_parser.add_argument("--current-points", type=int, help="当前账号积分；默认读取 TUSHARE_POINTS")
+    bundle_parser.add_argument("--profile", choices=["basic", "standard", "full"], default="full", help="按权限过滤读取口径，默认 full")
+    bundle_parser.add_argument("--access-catalog", help="权限目录路径，默认 data/maintenance/access.json")
+    bundle_parser.add_argument("--group", action="append", default=[], help="只读取指定数据组，可重复传入")
+    bundle_parser.add_argument("--exclude-group", action="append", default=[], help="排除指定数据组，可重复传入")
+    bundle_parser.add_argument("--include-financials", action="store_true", help="把需要股票池的财务数据纳入 bundle 读取计划")
+    bundle_parser.add_argument("--include-raw-samples", action="store_true", help="在 bundle 中包含少量原始样本")
+    bundle_parser.add_argument("--output", help="输出文件路径；不传则写入 stdout")
 
     def add_news_arguments(news_parser: argparse.ArgumentParser) -> None:
         news_parser.add_argument("--all", action="store_true", help="抓取全部已知来源；未指定 --source 时默认全部")
@@ -340,6 +454,158 @@ def _handle_research_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def _maintenance_provider(args: argparse.Namespace) -> AShareProvider:
+    return AShareProvider(
+        token=getattr(args, "token", None),
+        proxy_url=getattr(args, "proxy_url", None),
+        env_file=getattr(args, "env_file", ".env"),
+        points=getattr(args, "current_points", None),
+        data_dir=getattr(args, "data_dir", None),
+    )
+
+
+def _maintenance_plan_from_args(args: argparse.Namespace, provider: AShareProvider):
+    catalog = load_access_catalog(
+        getattr(args, "access_catalog", None),
+        data_dir=getattr(args, "data_dir", None),
+        env_file=getattr(args, "env_file", ".env"),
+    )
+    return build_maintenance_plan(
+        provider,
+        profile=args.profile,
+        access_catalog=catalog,
+        include_groups=set(args.group) if getattr(args, "group", None) else None,
+        exclude_groups=set(args.exclude_group) if getattr(args, "exclude_group", None) else None,
+        include_financials=getattr(args, "include_financials", False),
+    )
+
+
+def _stock_pool_from_args(args: argparse.Namespace) -> list[str] | None:
+    codes: list[str] = []
+    for code in getattr(args, "stock", []) or []:
+        text = str(code).strip()
+        if text:
+            codes.append(text)
+    stock_pool_file = getattr(args, "stock_pool_file", None)
+    if stock_pool_file:
+        for line in Path(stock_pool_file).read_text(encoding="utf-8").splitlines():
+            text = line.strip()
+            if text and not text.startswith("#"):
+                codes.append(text)
+    return list(dict.fromkeys(codes)) or None
+
+
+def _validate_financial_scope(args: argparse.Namespace, stock_pool: list[str] | None) -> None:
+    if not getattr(args, "include_financials", False):
+        return
+    if getattr(args, "maintain_command", None) not in {"daily", "backfill"}:
+        return
+    if stock_pool or getattr(args, "max_stocks", None) or getattr(args, "all_stocks_financials", False):
+        return
+    raise MaintenanceError(
+        "启用 --include-financials 时必须显式提供 --stock/--stock-pool-file/--max-stocks，"
+        "或使用 --all-stocks-financials 明确允许全市场财务维护。"
+    )
+
+
+def _handle_maintain(args: argparse.Namespace) -> int:
+    try:
+        provider = _maintenance_provider(args)
+        if args.maintain_command == "access-audit":
+            payload = audit_access(
+                provider,
+                profile=args.profile,
+                smoke_unknown=args.smoke_unknown,
+                data_dir=args.data_dir,
+            )
+            emit(json.dumps(payload, ensure_ascii=False, default=str, indent=2), args.output)
+            return 0
+
+        plan = _maintenance_plan_from_args(args, provider)
+        if args.maintain_command == "plan":
+            emit(json.dumps(plan.as_dict(), ensure_ascii=False, default=str, indent=2), args.output)
+            return 0
+
+        require_plan_has_datasets(plan)
+        stock_pool = _stock_pool_from_args(args)
+        _validate_financial_scope(args, stock_pool)
+        if args.maintain_command == "daily":
+            report = run_daily(
+                provider,
+                plan,
+                as_of=args.as_of,
+                end_date=args.end_date,
+                data_dir=args.data_dir,
+                lookback_days=args.lookback_days,
+                event_lookback_days=args.event_lookback_days,
+                refresh=args.refresh,
+                stock_pool=stock_pool,
+                max_stocks=args.max_stocks,
+            )
+        elif args.maintain_command == "backfill":
+            report = run_backfill(
+                provider,
+                plan,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                data_dir=args.data_dir,
+                refresh=args.refresh,
+                stock_pool=stock_pool,
+                max_stocks=args.max_stocks,
+            )
+        elif args.maintain_command == "check":
+            report = run_check(
+                provider,
+                plan,
+                end_date=args.end_date,
+                trade_days=args.trade_days,
+                event_days=args.event_days,
+                data_dir=args.data_dir,
+            )
+        elif args.maintain_command == "report":
+            report = run_status_report(
+                provider,
+                plan,
+                end_date=args.end_date,
+                trade_days=args.trade_days,
+                event_days=args.event_days,
+                data_dir=args.data_dir,
+            )
+        else:
+            raise MaintenanceError(f"未知维护命令：{args.maintain_command}")
+        emit(json.dumps(report, ensure_ascii=False, default=str, indent=2), args.output)
+    except MaintenanceError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except Exception as exc:  # noqa: BLE001
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
+def _handle_analysis(args: argparse.Namespace) -> int:
+    try:
+        if args.analysis_command != "bundle":
+            raise ValueError(f"未知 analysis 命令：{args.analysis_command}")
+        provider = _maintenance_provider(args)
+        plan = _maintenance_plan_from_args(args, provider)
+        require_plan_has_datasets(plan)
+        bundle = build_market_analysis_bundle(
+            as_of=args.as_of,
+            trade_days=args.trade_days,
+            data_dir=args.data_dir,
+            env_file=args.env_file,
+            include_raw_samples=args.include_raw_samples,
+            plan=plan,
+            event_days=args.event_days,
+        )
+        emit(json.dumps(bundle, ensure_ascii=False, default=str, indent=2), args.output)
+    except Exception as exc:  # noqa: BLE001
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
 def _format_from_path(path: str | Path) -> str:
     suffix = Path(path).suffix.lower()
     if suffix == ".jsonl":
@@ -533,6 +799,8 @@ def main(argv: list[str] | None = None) -> int:
         "call": _handle_call,
         "research-context": _handle_research_context,
         "research-summary": _handle_research_summary,
+        "maintain": _handle_maintain,
+        "analysis": _handle_analysis,
         "events": _handle_events,
     }
     return handlers[args.command](args)

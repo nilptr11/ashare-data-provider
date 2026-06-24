@@ -120,13 +120,33 @@ def run_akshare(call: Callable[[], Any], timeout: int = 30, verbose_source: bool
     def on_alarm(_signum: int, _frame: object) -> None:
         raise FetchTimeout(f"AKShare 请求超过 {timeout}s")
 
+    @contextlib.contextmanager
+    def default_requests_timeout() -> Any:
+        try:
+            import requests
+        except ImportError:
+            yield
+            return
+        original_request = requests.sessions.Session.request
+
+        def request_with_timeout(self: Any, method: str | bytes, url: str | bytes, **kwargs: Any) -> Any:
+            kwargs.setdefault("timeout", timeout)
+            return original_request(self, method, url, **kwargs)
+
+        requests.sessions.Session.request = request_with_timeout
+        try:
+            yield
+        finally:
+            requests.sessions.Session.request = original_request
+
     old_handler = signal.signal(signal.SIGALRM, on_alarm)
     signal.alarm(timeout)
     try:
-        if verbose_source:
-            return call()
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            return call()
+        with default_requests_timeout():
+            if verbose_source:
+                return call()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                return call()
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)

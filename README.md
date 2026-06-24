@@ -106,6 +106,156 @@ ashare call stock_basic \
 
 带 `trade_date` 的请求按天落盘；带 `start_date/end_date` 且接口支持 `trade_date` 时，会先通过交易日历拆成真实交易日，再逐日补缺并拼接返回。
 
+### 每日基础库维护与分析读取
+
+维护层面向长期基础库，不做 60/120 日滚动删除；60/120 日只是分析读取窗口。执行流程是：
+
+```text
+权限目录 -> 可执行维护计划 -> raw cache + canonical mart -> analysis bundle
+```
+
+先生成权限目录。没有权限、积分不足或需单独权限的接口不会进入后续维护计划；`unknown` 权限接口需要最小 smoke 验证后才进入：
+
+```bash
+ashare maintain access-audit --profile full --smoke-unknown
+```
+
+查看当前账号实际会维护的数据集：
+
+```bash
+ashare maintain plan --profile full --output reports/maintenance-plan.json
+```
+
+每日增量补缺并发布分析用 mart：
+
+```bash
+ashare maintain daily \
+  --as-of 2026-06-24 \
+  --end-date 2026-06-24 \
+  --profile full \
+  --lookback-days 10 \
+  --event-lookback-days 30 \
+  --output reports/maintenance-daily.json
+```
+
+`--as-of` 表示运行/分析锚点；`--end-date` 表示要维护的目标交易日分区。盘后想强制维护当日数据时传 `--end-date`；不传时默认使用 `as-of` 的上一完整交易日。
+
+历史回填不删除旧数据，适合首次建库或补历史：
+
+```bash
+ashare maintain backfill \
+  --start-date 20200101 \
+  --end-date 20260623 \
+  --profile full \
+  --output reports/maintenance-backfill.json
+```
+
+检查最近 120 个交易日和最近 180 个自然日事件分区的 mart 完整性：
+
+```bash
+ashare maintain check \
+  --end-date 20260623 \
+  --trade-days 120 \
+  --event-days 30 \
+  --profile full \
+  --output reports/maintenance-check.json
+```
+
+生成每日运行报告，用于判断当日是否可分析：
+
+```bash
+ashare maintain report \
+  --end-date 20260623 \
+  --trade-days 120 \
+  --event-days 30 \
+  --profile full \
+  --output reports/daily-status-report.json
+```
+
+`maintain report` 会汇总数据覆盖率、缺口、异常空分区、fallback 使用情况和 `analysis_ready`。核心行情、指数、行业缺失会把状态标为 `blocked`；资金流、短线情绪、事件、新闻缺口会作为 warning 暴露。
+
+推荐分两个批次调度：
+
+```bash
+# 盘后初版：16:00-17:00，优先验证行情、涨跌停、指数、行业。
+ashare maintain daily --as-of 2026-06-24 --end-date 2026-06-24 --profile full --lookback-days 10 --event-lookback-days 7
+ashare maintain report --end-date 2026-06-24 --profile full --trade-days 120 --event-days 7
+
+# 晚间修正版：20:00-22:30，重试公告、龙虎榜、资金流、业绩预告、新闻。
+ashare maintain daily --as-of 2026-06-24 --end-date 2026-06-24 --profile full --lookback-days 10 --event-lookback-days 30 --refresh
+ashare maintain report --end-date 2026-06-24 --profile full --trade-days 120 --event-days 30
+```
+
+可以用 `--group` 只维护某一类数据，例如只补资金流、短线情绪或财务：
+
+```bash
+ashare maintain backfill --start-date 20251219 --end-date 20260623 --profile full --group moneyflow
+ashare maintain backfill --start-date 20251219 --end-date 20260623 --profile full --group short_term
+```
+
+逐股财务表不会默认进入 daily/full 批量任务，必须显式传入 `--include-financials`。执行逐股财务维护时还必须显式提供 `--stock`、`--stock-pool-file`、`--max-stocks`，或用 `--all-stocks-financials` 明确允许全市场逐股请求：
+
+```bash
+ashare maintain backfill \
+  --start-date 20240101 \
+  --end-date 20260623 \
+  --profile full \
+  --group financials \
+  --include-financials \
+  --stock 000001.SZ \
+  --stock 600000.SH \
+  --output reports/financials-backfill.json
+```
+
+`disclosure_date` 是按最近报告期维护的披露日程，不需要股票池；只维护披露日期时可以直接运行：
+
+```bash
+ashare maintain daily \
+  --end-date 20260623 \
+  --profile full \
+  --group financials \
+  --output reports/disclosure-date-daily.json
+```
+
+也可以用文件传股票池：
+
+```bash
+ashare maintain daily \
+  --profile full \
+  --group financials \
+  --include-financials \
+  --stock-pool-file stock-pool.txt \
+  --max-stocks 100
+```
+
+维护过程会保留两层数据：
+
+```text
+data/tushare/...                         # 原始 API 请求缓存，用于追溯和避免重复请求
+data/mart/{dataset}/trade_date=YYYYMMDD  # 标准分析分区表，用于高效读取
+data/mart/{dataset}/publish_date=YYYY-MM-DD # 公告/业绩预告自然日分区
+data/mart/trade_cal/exchange=SSE         # 标准交易日历表
+```
+
+面向 LLM 或分析框架时，不直接读零散接口缓存，而是从 mart 生成 bundle：
+
+```bash
+ashare analysis bundle \
+  --as-of 2026-06-23 \
+  --trade-days 120 \
+  --event-days 180 \
+  --profile full \
+  --output analysis-bundle.json
+```
+
+`analysis bundle` 和维护命令使用同一套权限过滤后的 active plan；无权限的 Tushare 接口不会进入读取流程，也不会出现在 bundle 的 `datasets` 中。它会读取全市场量价窗口、股票基础信息、当日多口径资金流、涨跌停池、连板梯队、概念强度等本地分区，并输出 row count、核心特征、排名样本、`coverage`、`data_gaps` 和 provenance。分析阶段默认只读本地 mart；缺数据时应先运行 `maintain daily` 或 `maintain backfill` 补齐。
+
+当前 bundle 还会按 active plan 读取指数、行业、龙虎榜、融资融券、公告、`earnings_forecast` 业绩预告、KPL/同花顺题材补充、新闻分区和已落库财务数据。`limit_list_d` 如果 Tushare 当日返回空结果，维护层会使用 AKShare 东方财富涨停/炸板/跌停池作为 fallback，并统一发布到 `limit_list_d` mart。
+
+维护层会给 mart 分区写入 `quality_status`，区分分区存在和分区健康。核心行情、指数、行业等历史交易日数据不允许空分区；公告和业绩预告会为维护过但无记录的自然日写入健康空分区；部分 T+0/T+1 发布源如融资融券、KPL、THS 补充口径会先标记 `pending_empty`，超过滞后期仍为空才进入 `suspicious_empty` 并在后续维护中自动重试。`maintain check` 会报告 `expected_count/available_count/missing_count/coverage_ratio`、`pending_empty_partitions` 和 `quality_issues`，避免把临时空返回静默缓存成长期完整数据。
+
+外部产业证据层不放进 A 股基础 mart。商品/材料价格、产能、库存、开工率、海外 AI capex、订单/招标、政策文件、行业研报和公司调研更适合单独建设 `evidence/industry` 层，并在分析时作为证据包和 A 股基础 bundle 组合读取。
+
 ### A 股事件能力
 
 当前高层事件能力明确为三类：A 股公告、业绩预告、时讯。公告和业绩预告走 AKShare；Tushare `forecast` 与 `news` API 暂时不作为高层能力使用。时讯继续抓取登录后可见的 Tushare 资讯页，作为当前快讯替代源。
