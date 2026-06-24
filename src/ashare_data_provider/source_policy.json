@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22",
+  "updated_at": "2026-06-24",
   "scope": "A-share research context source policy for Prism.",
   "principles": [
     "Prefer structured project data over ad hoc web search.",
@@ -87,7 +87,8 @@
       "market_daily": ["daily", "daily_basic", "adj_factor", "stk_limit", "pro_bar"],
       "market_weekly_monthly": ["weekly", "monthly", "stk_weekly_monthly", "stk_week_month_adj"],
       "index_and_industry": ["index_daily", "index_dailybasic", "sw_daily", "ci_daily", "index_member_all", "ci_index_member", "index_classify", "index_weight", "daily_info", "sz_daily_info"],
-      "fundamentals": ["income", "balancesheet", "cashflow", "fina_indicator", "fina_mainbz", "express", "forecast", "dividend", "fina_audit", "disclosure_date"],
+      "fundamentals": ["income", "balancesheet", "cashflow", "fina_indicator", "fina_mainbz", "express", "dividend", "fina_audit", "disclosure_date"],
+      "project_builtin_events": ["a_stock_notice", "earnings_forecast", "event_news"],
       "shareholders": ["top10_holders", "top10_floatholders", "stk_holdertrade", "pledge_stat", "pledge_detail", "share_float", "repurchase"],
       "margin_and_flow": ["margin_detail", "slb_len", "moneyflow_ind_ths", "moneyflow_ind_dc", "moneyflow_cnt_ths"],
       "themes_and_short_term": ["limit_list_d", "limit_list_ths", "limit_step", "limit_cpt_list", "top_list", "dc_daily", "ths_member", "tdx_member", "tdx_daily", "ths_hot", "kpl_list"],
@@ -100,7 +101,7 @@
         "local_cache has successful current data for exact params",
         "operator explicitly permits exploratory call"
       ],
-      "examples": ["daily", "pro_bar", "trade_cal", "cn_cpi", "shibor_lpr", "cn_pmi", "cn_m", "moneyflow", "moneyflow_hsgt", "rt_k", "rt_min", "forecast"]
+      "examples": ["daily", "pro_bar", "trade_cal", "cn_cpi", "shibor_lpr", "cn_pmi", "cn_m", "moneyflow", "moneyflow_hsgt", "rt_k", "rt_min"]
     }
   },
   "project_builtin_sources": {
@@ -448,7 +449,7 @@
         "id": "financial_statement_gap",
         "match": {
           "section": "fundamentals",
-          "api_names": ["income", "balancesheet", "cashflow", "fina_indicator", "fina_mainbz", "express", "forecast", "dividend", "fina_audit", "disclosure_date"]
+          "api_names": ["income", "balancesheet", "cashflow", "fina_indicator", "fina_mainbz", "express", "dividend", "fina_audit", "disclosure_date"]
         },
         "allowed_source_groups": ["announcements"],
         "priority": ["cninfo_disclosure", "sse_announcements", "szse_announcements", "eastmoney_notices"],
@@ -460,7 +461,7 @@
         "match": {
           "section": "events",
           "names": ["announcements", "earnings_forecast"],
-          "api_names": ["anns_d", "forecast", "express"]
+          "api_names": ["anns_d", "earnings_forecast", "express"]
         },
         "allowed_source_groups": ["announcements"],
         "priority": ["cninfo_disclosure", "sse_announcements", "szse_announcements", "eastmoney_notices"],

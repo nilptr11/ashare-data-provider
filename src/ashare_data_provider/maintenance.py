@@ -2047,6 +2047,44 @@ def _stock_pool_codes(
     return deduped[:max_stocks] if max_stocks and max_stocks > 0 else deduped
 
 
+def _financial_request_params(api_name: str, ts_code: str, start_date: str, end_date: str, variant_params: dict[str, Any]) -> dict[str, Any]:
+    params: dict[str, Any] = {"ts_code": ts_code}
+    if api_name != "dividend":
+        params.update({"start_date": start_date, "end_date": end_date})
+    params.update(variant_params)
+    return params
+
+
+def _normalize_financial_date(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "nat", "none"}:
+        return ""
+    try:
+        return _format_yyyymmdd(text[:10])
+    except (TypeError, ValueError):
+        return ""
+
+
+def _filter_financial_frame(api_name: str, frame: Any, start_date: str, end_date: str) -> Any:
+    if api_name != "dividend" or frame.empty:
+        return frame
+    date_columns = [column for column in ["ann_date", "imp_ann_date", "record_date", "ex_date", "pay_date"] if column in frame.columns]
+    if not date_columns:
+        return frame
+    try:
+        import pandas as pd
+    except ImportError as exc:  # pragma: no cover - pandas is a dependency
+        raise MaintenanceError("财务数据过滤需要 pandas") from exc
+
+    mask = pd.Series(False, index=frame.index)
+    for column in date_columns:
+        normalized = frame[column].map(_normalize_financial_date)
+        mask = mask | ((normalized >= start_date) & (normalized <= end_date))
+    return frame[mask].copy()
+
+
 def _publish_financial_dataset(
     provider: AShareProvider,
     mart: MartStore,
@@ -2067,12 +2105,12 @@ def _publish_financial_dataset(
     variants = _request_variants(spec)
     for ts_code in codes:
         for variant in variants:
-            params = {"ts_code": ts_code, "start_date": start_date, "end_date": end_date}
-            params.update(variant.params)
+            params = _financial_request_params(spec.api_name, ts_code, start_date, end_date, variant.params)
             try:
                 result = provider.call(spec.api_name, params=params, fields=variant.fields or spec.fields)
-                if _record_count(result) > 0:
-                    frame = _append_column(result, "_variant", variant.label) if len(variants) > 1 else _to_frame(result)
+                frame = _filter_financial_frame(spec.api_name, _to_frame(result), start_date, end_date)
+                if _record_count(frame) > 0:
+                    frame = _append_column(frame, "_variant", variant.label) if len(variants) > 1 else frame
                     values.append(frame)
             except Exception as exc:  # noqa: BLE001 - report per stock
                 errors.append({"ts_code": ts_code, "variant": variant.label, "error_type": type(exc).__name__, "error": str(exc)})
@@ -2129,7 +2167,14 @@ def _publish_financial_dataset(
             spec.name,
             {"period": period},
             group.reset_index(drop=True),
-            source={"kind": "tushare", "api_name": spec.api_name, "stock_pool": len(codes), "start_date": start_date, "end_date": end_date},
+            source={
+                "kind": "tushare",
+                "api_name": spec.api_name,
+                "stock_pool": len(codes),
+                "start_date": start_date,
+                "end_date": end_date,
+                "request_mode": "stock_only_filtered" if spec.api_name == "dividend" else "date_range",
+            },
         )
         rows += int(meta["rows"])
         written += 1
@@ -2870,11 +2915,54 @@ def _latest_partition_values(mart: MartStore, dataset: str, partition_key: str, 
 def _financial_check_summary(mart: MartStore, spec: DatasetSpec) -> dict[str, Any]:
     periods = _latest_partition_values(mart, spec.name, "period", limit=8)
     rows = 0
+    coverage_periods: list[dict[str, Any]] = []
     for period in periods:
+        partition = {"period": period}
         meta = mart.read_meta(spec.name, {"period": period}) or {}
         value = meta.get("rows")
-        rows += int(value) if isinstance(value, int) else 0
-    return {
+        partition_rows = int(value) if isinstance(value, int) else 0
+        rows += partition_rows
+        if spec.maintenance_kind != "stock_pool_financial":
+            continue
+        source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+        requested_stock_count = _optional_positive_int(source.get("stock_pool"))
+        returned_stock_count: int | None = None
+        if mart.exists(spec.name, partition):
+            frame = mart.read_dataset(spec.name, partition)
+            if hasattr(frame, "empty") and frame.empty:
+                returned_stock_count = 0
+            elif hasattr(frame, "columns") and "ts_code" in frame.columns:
+                returned_stock_count = int(frame["ts_code"].dropna().astype(str).nunique())
+        missing_stock_count: int | None = None
+        stock_coverage_ratio: float | None = None
+        stock_coverage_status = "unknown"
+        if requested_stock_count is not None and returned_stock_count is not None:
+            missing_stock_count = max(requested_stock_count - returned_stock_count, 0)
+            stock_coverage_ratio = round(returned_stock_count / requested_stock_count, 6) if requested_stock_count else None
+            if requested_stock_count == 0:
+                stock_coverage_status = "empty_request"
+            elif missing_stock_count == 0:
+                stock_coverage_status = "complete"
+            elif returned_stock_count > 0:
+                stock_coverage_status = "partial"
+            else:
+                stock_coverage_status = "missing"
+        coverage_periods.append(
+            {
+                "period": period,
+                "rows": partition_rows,
+                "requested_stock_count": requested_stock_count,
+                "returned_stock_count": returned_stock_count,
+                "missing_stock_count": missing_stock_count,
+                "stock_coverage_ratio": stock_coverage_ratio,
+                "stock_coverage_status": stock_coverage_status,
+                "request_mode": source.get("request_mode"),
+                "source_start_date": source.get("start_date"),
+                "source_end_date": source.get("end_date"),
+                "published_at": meta.get("published_at"),
+            }
+        )
+    summary = {
         "status": "complete" if periods else "missing",
         "partition_key": "period",
         "check_strategy": "stock_pool_periods",
@@ -2887,14 +2975,114 @@ def _financial_check_summary(mart: MartStore, spec: DatasetSpec) -> dict[str, An
         "rows": rows,
         "message": "财务数据按显式股票池/候选池增量维护，不默认全市场日扫。",
     }
+    if coverage_periods:
+        latest = coverage_periods[-1]
+        summary.update(
+            {
+                "requested_stock_count": latest["requested_stock_count"],
+                "returned_stock_count": latest["returned_stock_count"],
+                "missing_stock_count": latest["missing_stock_count"],
+                "stock_coverage_ratio": latest["stock_coverage_ratio"],
+                "stock_coverage_status": latest["stock_coverage_status"],
+                "request_mode": latest["request_mode"],
+                "stock_coverage_check_strategy": "observed_period_stock_pool",
+                "stock_coverage_note": "财务股票池覆盖为复盘观测信息；业绩快报、分红、审计意见等稀疏表覆盖不足不自动视为维护失败。",
+                "stock_coverage_periods": coverage_periods,
+            }
+        )
+    return summary
+
+
+def _optional_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    return None
+
+
+def _stock_pool_daily_check_summary(mart: MartStore, spec: DatasetSpec, trade_date: str, quality_as_of: str) -> dict[str, Any]:
+    summary = _partition_check_summary(mart, spec, [trade_date], quality_as_of, spec.date_param or "trade_date")
+    summary["check_strategy"] = "latest_stock_pool_only"
+    summary["historical_backfill"] = False
+    summary["message"] = "股票池日频数据按显式股票池维护，默认只验收目标交易日，不按全市场连续历史窗口验收。"
+
+    partition = _partition_for(spec, trade_date)
+    meta = mart.read_meta(spec.name, partition) or {}
+    source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+    requested_raw = source.get("stock_pool")
+    requested_stock_count: int | None = None
+    if isinstance(requested_raw, int):
+        requested_stock_count = requested_raw
+    elif isinstance(requested_raw, str) and requested_raw.isdigit():
+        requested_stock_count = int(requested_raw)
+
+    returned_stock_count: int | None = None
+    if mart.exists(spec.name, partition):
+        frame = mart.read_dataset(spec.name, partition)
+        if hasattr(frame, "empty") and not frame.empty and "ts_code" in frame:
+            returned_stock_count = int(frame["ts_code"].dropna().astype(str).nunique())
+        else:
+            returned_stock_count = 0
+
+    missing_stock_count: int | None = None
+    stock_coverage_ratio: float | None = None
+    stock_coverage_status: str | None = None
+    if requested_stock_count is not None and returned_stock_count is not None:
+        missing_stock_count = max(requested_stock_count - returned_stock_count, 0)
+        stock_coverage_ratio = round(returned_stock_count / requested_stock_count, 6) if requested_stock_count else None
+        if requested_stock_count == 0:
+            stock_coverage_status = "empty_request"
+        elif missing_stock_count == 0:
+            stock_coverage_status = "complete"
+        elif returned_stock_count > 0:
+            stock_coverage_status = "partial"
+        else:
+            stock_coverage_status = "missing"
+
+    summary.update(
+        {
+            "requested_stock_count": requested_stock_count,
+            "returned_stock_count": returned_stock_count,
+            "missing_stock_count": missing_stock_count,
+            "stock_coverage_ratio": stock_coverage_ratio,
+            "stock_coverage_status": stock_coverage_status,
+        }
+    )
+
+    if stock_coverage_status in {"partial", "missing"}:
+        summary["status"] = "needs_retry"
+        summary.setdefault("quality_issues", []).append(
+            {
+                "date": trade_date,
+                "quality_status": "stock_pool_coverage",
+                "rows": meta.get("rows"),
+                "reason": "returned_stock_count_below_requested_stock_count",
+                "issues": [
+                    {
+                        "type": "stock_pool_coverage",
+                        "requested_stock_count": requested_stock_count,
+                        "returned_stock_count": returned_stock_count,
+                        "missing_stock_count": missing_stock_count,
+                    }
+                ],
+            }
+        )
+    return summary
 
 
 def run_check(
     provider: AShareProvider,
     plan: MaintenancePlan,
     end_date: str | date | datetime,
-    trade_days: int = 120,
-    event_days: int = 180,
+    trade_days: int = 30,
+    event_days: int = 30,
     data_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     end_text = _format_yyyymmdd(end_date)
@@ -2914,9 +3102,9 @@ def run_check(
                 result.update(_partition_check_summary(mart, spec, [end_text], quality_as_of, "trade_date"))
                 result["check_strategy"] = "latest_partition_only"
                 if spec.group == "membership":
-                    result["message"] = "题材/概念成分映射按目标交易日维护，不强制 120 日历史窗口。"
+                    result["message"] = "题材/概念成分映射按目标交易日维护，不强制连续历史窗口。"
                 else:
-                    result["message"] = "热榜/沪深港通信号按目标交易日维护，不强制 120 日历史窗口。"
+                    result["message"] = "热榜/沪深港通信号按目标交易日维护，不强制连续历史窗口。"
             else:
                 result.update(_partition_check_summary(mart, spec, dates, quality_as_of, "trade_date"))
         elif spec.maintenance_kind == "calendar":
@@ -2961,8 +3149,7 @@ def run_check(
             result.update(_financial_check_summary(mart, spec))
             result["message"] = "财报披露日期按最近报告期维护，不按交易日窗口维护。"
         elif spec.maintenance_kind == "stock_pool_daily":
-            result.update(_partition_check_summary(mart, spec, dates, quality_as_of, spec.date_param or "trade_date"))
-            result["message"] = "股票池日频数据按显式股票池维护，不默认全市场日扫。"
+            result.update(_stock_pool_daily_check_summary(mart, spec, end_text, quality_as_of))
         else:
             result.update({"status": "not_checked", "message": f"未知维护类型：{spec.maintenance_kind}"})
         datasets.append(result)
@@ -3010,11 +3197,44 @@ def _scan_fallback_usage(mart: MartStore, dataset_names: set[str]) -> dict[str, 
     return {"by_dataset": usage, "samples": samples}
 
 
+def _stock_pool_coverage_report_items(datasets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    stock_fields = (
+        "requested_stock_count",
+        "returned_stock_count",
+        "missing_stock_count",
+        "stock_coverage_ratio",
+        "stock_coverage_status",
+    )
+    for item in datasets:
+        periods = item.get("stock_coverage_periods") if isinstance(item.get("stock_coverage_periods"), list) else []
+        if not periods and not any(item.get(field) is not None for field in stock_fields):
+            continue
+        items.append(
+            {
+                "dataset": item["name"],
+                "group": item["group"],
+                "status": item.get("status"),
+                "check_strategy": item.get("stock_coverage_check_strategy") or item.get("check_strategy"),
+                "requested_stock_count": item.get("requested_stock_count"),
+                "returned_stock_count": item.get("returned_stock_count"),
+                "missing_stock_count": item.get("missing_stock_count"),
+                "stock_coverage_ratio": item.get("stock_coverage_ratio"),
+                "stock_coverage_status": item.get("stock_coverage_status"),
+                "request_mode": item.get("request_mode"),
+                "period_sample": periods[-5:],
+                "message": item.get("message"),
+                "note": item.get("stock_coverage_note"),
+            }
+        )
+    return items
+
+
 def run_status_report(
     provider: AShareProvider,
     plan: MaintenancePlan,
     end_date: str | date | datetime,
-    trade_days: int = 120,
+    trade_days: int = 30,
     event_days: int = 30,
     data_dir: str | Path | None = None,
     write_report_file: bool = True,
@@ -3066,6 +3286,11 @@ def run_status_report(
             "expected_count": item.get("expected_count"),
             "available_count": item.get("available_count"),
             "coverage_ratio": item.get("coverage_ratio"),
+            "requested_stock_count": item.get("requested_stock_count"),
+            "returned_stock_count": item.get("returned_stock_count"),
+            "missing_stock_count": item.get("missing_stock_count"),
+            "stock_coverage_ratio": item.get("stock_coverage_ratio"),
+            "stock_coverage_status": item.get("stock_coverage_status"),
             "missing_sample": (item.get("missing_partitions") or [])[:10],
             "message": item.get("message"),
         }
@@ -3074,6 +3299,7 @@ def run_status_report(
     ]
     mart = MartStore(data_dir=data_dir, env_file=provider._env_file)
     fallback_usage = _scan_fallback_usage(mart, {item.spec.name for item in plan.datasets})
+    stock_pool_coverage = _stock_pool_coverage_report_items(datasets)
     coverage_ratios = [
         float(item["coverage_ratio"])
         for item in datasets
@@ -3126,6 +3352,7 @@ def run_status_report(
             ],
         },
         "coverage_gaps": gaps,
+        "stock_pool_coverage": stock_pool_coverage,
         "pending_empty_partitions": pending_empty,
         "quality_issues": quality_issues,
         "fallback_usage": fallback_usage,

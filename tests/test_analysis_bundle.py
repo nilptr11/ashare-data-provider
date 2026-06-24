@@ -122,7 +122,12 @@ class AnalysisBundleTest(unittest.TestCase):
             mart.write("limit_list_ths", {"trade_date": "20260623"}, pd.DataFrame([{"ts_code": "000001.SZ", "name": "平安银行"}]))
             mart.write("ths_hot", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "rank": 1}]))
             mart.write("dc_hot", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "rank": 1}]))
-            mart.write("cyq_perf", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "winner_rate": 50.0}]))
+            mart.write(
+                "cyq_perf",
+                {"trade_date": "20260623"},
+                pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "winner_rate": 50.0}]),
+                source={"kind": "tushare", "api_name": "cyq_perf", "stock_pool": 1, "start_date": "20260622", "end_date": "20260623"},
+            )
             mart.write("cyq_chips", {"trade_date": "20260623"}, pd.DataFrame([{"trade_date": "20260623", "ts_code": "000001.SZ", "price": 10.0, "percent": 1.0}]))
             mart.write("index_classify", {"snapshot_date": "20260623"}, pd.DataFrame([{"index_code": "801780.SI", "industry_name": "银行"}]))
             mart.write(
@@ -165,6 +170,14 @@ class AnalysisBundleTest(unittest.TestCase):
                 "income",
                 {"period": "20260331"},
                 pd.DataFrame([{"ts_code": "000001.SZ", "period": "20260331", "revenue": 100.0}]),
+                source={
+                    "kind": "tushare",
+                    "api_name": "income",
+                    "stock_pool": 1,
+                    "start_date": "20250101",
+                    "end_date": "20260623",
+                    "request_mode": "date_range",
+                },
             )
 
             active = [
@@ -235,6 +248,14 @@ class AnalysisBundleTest(unittest.TestCase):
         self.assertEqual(bundle["features"]["financials"]["income_sample"][0]["period"], "20260331")
         self.assertEqual(bundle["coverage"]["earnings_forecast"]["missing_count"], 0)
         self.assertFalse(bundle["provenance"]["event_news"]["historical_backfill"])
+        cyq_meta = bundle["provenance"]["dataset_metadata"]["cyq_perf"]
+        self.assertEqual(cyq_meta["latest"]["source"]["stock_pool"], 1)
+        self.assertEqual(cyq_meta["latest"]["source"]["start_date"], "20260622")
+        self.assertEqual(cyq_meta["source_summary"]["stock_pool_counts"], [1])
+        income_meta = bundle["provenance"]["dataset_metadata"]["income"]
+        self.assertEqual(income_meta["latest"]["partition"], {"period": "20260331"})
+        self.assertEqual(income_meta["latest"]["source"]["request_mode"], "date_range")
+        self.assertEqual(income_meta["source_summary"]["start_date_min"], "20250101")
         self.assertEqual(bundle["data_gaps"], [])
 
     def test_market_bundle_only_reads_active_plan_datasets(self) -> None:

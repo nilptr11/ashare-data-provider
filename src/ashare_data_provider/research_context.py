@@ -365,7 +365,6 @@ def build_research_context(
         ("fina_indicator", "fina_indicator", {"ts_code": ts_code, "start_date": financial_start_text, "end_date": anchor_text}),
         ("fina_mainbz", "fina_mainbz", {"ts_code": ts_code, "start_date": financial_start_text, "end_date": anchor_text}),
         ("express", "express", {"ts_code": ts_code, "start_date": financial_start_text, "end_date": anchor_text}),
-        ("forecast_raw", "forecast", {"ts_code": ts_code, "start_date": financial_start_text, "end_date": anchor_text}),
         ("dividend", "dividend", {"ts_code": ts_code}),
         ("fina_audit", "fina_audit", {"ts_code": ts_code, "start_date": financial_start_text, "end_date": anchor_text}),
     ]

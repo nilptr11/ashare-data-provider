@@ -323,6 +323,112 @@ class MaintenanceTest(unittest.TestCase):
         self.assertEqual(caller.calls[0]["api_name"], "income")
         self.assertEqual(caller.calls[0]["params"]["ts_code"], "000001.SZ")
 
+    def test_financial_check_reports_stock_pool_coverage_without_blocking(self) -> None:
+        specs = (
+            DatasetSpec(
+                "income",
+                "financials",
+                "income",
+                "利润表",
+                "full",
+                "stock_pool_financial",
+                date_param="period",
+                requires_stock_pool=True,
+            ),
+        )
+        provider = make_provider(
+            make_registry(
+                {"api_name": "income", "eligibility": "points_ok"},
+                {"api_name": "trade_cal", "eligibility": "points_ok"},
+            )
+        )
+        plan = build_maintenance_plan(provider, profile="full", specs=specs, include_financials=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mart = MartStore(data_dir=tmp_dir)
+            mart.write(
+                "income",
+                {"period": "20260331"},
+                pd.DataFrame(
+                    [
+                        {"ts_code": "000001.SZ", "period": "20260331", "revenue": 99.0},
+                        {"ts_code": "000002.SZ", "period": "20260331", "revenue": 88.0},
+                    ]
+                ),
+                source={
+                    "kind": "tushare",
+                    "api_name": "income",
+                    "stock_pool": 3,
+                    "start_date": "20250101",
+                    "end_date": "20260623",
+                    "request_mode": "date_range",
+                },
+            )
+            check = run_check(provider, plan, "20260623", trade_days=1, data_dir=tmp_dir)
+            report = run_status_report(provider, plan, "20260623", trade_days=1, event_days=1, data_dir=tmp_dir, write_report_file=False)
+
+        item = check["datasets"][0]
+        self.assertEqual(item["status"], "complete")
+        self.assertEqual(item["requested_stock_count"], 3)
+        self.assertEqual(item["returned_stock_count"], 2)
+        self.assertEqual(item["missing_stock_count"], 1)
+        self.assertEqual(item["stock_coverage_ratio"], 0.666667)
+        self.assertEqual(item["stock_coverage_status"], "partial")
+        self.assertEqual(item["request_mode"], "date_range")
+        self.assertEqual(item["stock_coverage_periods"][0]["period"], "20260331")
+        self.assertEqual(item["stock_coverage_periods"][0]["source_start_date"], "20250101")
+
+        coverage = {entry["dataset"]: entry for entry in report["stock_pool_coverage"]}
+        self.assertIn("income", coverage)
+        self.assertEqual(coverage["income"]["status"], "complete")
+        self.assertEqual(coverage["income"]["stock_coverage_status"], "partial")
+        self.assertEqual(coverage["income"]["period_sample"][0]["period"], "20260331")
+
+    def test_dividend_backfill_uses_stock_only_request_and_filters_event_window(self) -> None:
+        class DividendCaller(FakeCaller):
+            def call(self, api_name, params=None, fields=None):  # noqa: ANN001
+                self.calls.append({"api_name": api_name, "params": params or {}, "fields": fields})
+                if api_name == "dividend":
+                    if "start_date" in params or "end_date" in params:
+                        raise AssertionError("dividend should not use start_date/end_date")
+                    return pd.DataFrame(
+                        [
+                            {"ts_code": params["ts_code"], "end_date": "20251231", "ann_date": "20260321", "cash_div": 0.36},
+                            {"ts_code": params["ts_code"], "end_date": "20250630", "ann_date": None, "imp_ann_date": "20250930", "cash_div": 0.236},
+                            {"ts_code": params["ts_code"], "end_date": "20231231", "ann_date": "20240401", "cash_div": 0.1},
+                        ]
+                    )
+                return super().call(api_name, params=params, fields=fields)
+
+        specs = (
+            DatasetSpec(
+                "dividend",
+                "financials",
+                "dividend",
+                "分红送股",
+                "full",
+                "stock_pool_financial",
+                date_param="period",
+                requires_stock_pool=True,
+            ),
+        )
+        caller = DividendCaller()
+        provider = make_provider(make_registry({"api_name": "dividend", "eligibility": "points_ok"}), caller=caller)
+        plan = build_maintenance_plan(provider, profile="full", specs=specs, include_financials=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report = run_backfill(provider, plan, "20250101", "20260623", data_dir=tmp_dir, stock_pool=["000001.SZ"])
+            mart = MartStore(data_dir=tmp_dir)
+            annual = mart.read_dataset("dividend", {"period": "20251231"})
+            interim = mart.read_dataset("dividend", {"period": "20250630"})
+
+        self.assertEqual(report["datasets"][0]["status"], "success")
+        self.assertEqual(report["datasets"][0]["rows"], 2)
+        self.assertEqual(report["datasets"][0]["partitions_written"], 2)
+        self.assertEqual(annual["cash_div"].tolist(), [0.36])
+        self.assertEqual(interim["cash_div"].tolist(), [0.236])
+        self.assertEqual(caller.calls[0]["params"], {"ts_code": "000001.SZ"})
+
     def test_stock_pool_daily_backfill_partitions_by_trade_date(self) -> None:
         specs = (
             DatasetSpec(
@@ -353,6 +459,110 @@ class MaintenanceTest(unittest.TestCase):
         self.assertEqual(second["winner_rate"].tolist(), [51.0])
         self.assertEqual(caller.calls[0]["params"]["start_date"], "20260622")
         self.assertEqual(caller.calls[0]["params"]["end_date"], "20260623")
+
+    def test_stock_pool_daily_check_uses_latest_partition_and_stock_coverage(self) -> None:
+        class ManyTradeDaysCaller(FakeCaller):
+            def call(self, api_name, params=None, fields=None):  # noqa: ANN001
+                if api_name == "trade_cal":
+                    return pd.DataFrame(
+                        [
+                            {"cal_date": item.strftime("%Y%m%d"), "is_open": 1}
+                            for item in pd.date_range("2026-01-01", "2026-06-23", freq="B")
+                        ]
+                    )
+                return super().call(api_name, params=params, fields=fields)
+
+        specs = (
+            DatasetSpec(
+                "cyq_chips",
+                "chips",
+                "cyq_chips",
+                "筹码分布",
+                "full",
+                "stock_pool_daily",
+                date_param="trade_date",
+                requires_stock_pool=True,
+                required_columns=("ts_code", "trade_date", "price", "percent"),
+                unique_key=("ts_code", "trade_date", "price"),
+            ),
+        )
+        provider = make_provider(
+            make_registry({"api_name": "cyq_chips", "eligibility": "points_ok"}, {"api_name": "trade_cal", "eligibility": "points_ok"}),
+            caller=ManyTradeDaysCaller(),
+        )
+        plan = build_maintenance_plan(provider, profile="full", specs=specs, include_stock_pool_datasets=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mart = MartStore(data_dir=tmp_dir)
+            mart.write(
+                "cyq_chips",
+                {"trade_date": "20260623"},
+                pd.DataFrame(
+                    [
+                        {"ts_code": "000001.SZ", "trade_date": "20260623", "price": 10.0, "percent": 0.4},
+                        {"ts_code": "000001.SZ", "trade_date": "20260623", "price": 10.1, "percent": 0.6},
+                        {"ts_code": "000002.SZ", "trade_date": "20260623", "price": 20.0, "percent": 1.0},
+                    ]
+                ),
+                source={"kind": "tushare", "api_name": "cyq_chips", "stock_pool": 2},
+            )
+            check = run_check(provider, plan, "20260623", trade_days=120, data_dir=tmp_dir)
+
+        item = check["datasets"][0]
+        self.assertEqual(item["status"], "complete")
+        self.assertEqual(item["check_strategy"], "latest_stock_pool_only")
+        self.assertEqual(item["expected_count"], 1)
+        self.assertEqual(item["available_count"], 1)
+        self.assertEqual(item["missing_count"], 0)
+        self.assertEqual(item["requested_stock_count"], 2)
+        self.assertEqual(item["returned_stock_count"], 2)
+        self.assertEqual(item["missing_stock_count"], 0)
+        self.assertEqual(item["stock_coverage_ratio"], 1.0)
+        self.assertEqual(item["stock_coverage_status"], "complete")
+
+    def test_stock_pool_daily_check_flags_partial_stock_coverage(self) -> None:
+        specs = (
+            DatasetSpec(
+                "cyq_perf",
+                "chips",
+                "cyq_perf",
+                "筹码胜率",
+                "full",
+                "stock_pool_daily",
+                date_param="trade_date",
+                requires_stock_pool=True,
+                required_columns=("ts_code", "trade_date"),
+                unique_key=("ts_code", "trade_date"),
+            ),
+        )
+        provider = make_provider(
+            make_registry({"api_name": "cyq_perf", "eligibility": "points_ok"}, {"api_name": "trade_cal", "eligibility": "points_ok"})
+        )
+        plan = build_maintenance_plan(provider, profile="full", specs=specs, include_stock_pool_datasets=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mart = MartStore(data_dir=tmp_dir)
+            mart.write(
+                "cyq_perf",
+                {"trade_date": "20260623"},
+                pd.DataFrame(
+                    [
+                        {"ts_code": "000001.SZ", "trade_date": "20260623", "winner_rate": 50.0},
+                        {"ts_code": "000002.SZ", "trade_date": "20260623", "winner_rate": 40.0},
+                    ]
+                ),
+                source={"kind": "tushare", "api_name": "cyq_perf", "stock_pool": 3},
+            )
+            check = run_check(provider, plan, "20260623", trade_days=120, data_dir=tmp_dir)
+
+        item = check["datasets"][0]
+        self.assertEqual(item["status"], "needs_retry")
+        self.assertEqual(item["requested_stock_count"], 3)
+        self.assertEqual(item["returned_stock_count"], 2)
+        self.assertEqual(item["missing_stock_count"], 1)
+        self.assertEqual(item["stock_coverage_ratio"], 0.666667)
+        self.assertEqual(item["stock_coverage_status"], "partial")
+        self.assertEqual(item["quality_issues"][0]["quality_status"], "stock_pool_coverage")
 
     def test_member_snapshot_backfill_uses_driver_codes(self) -> None:
         specs = (

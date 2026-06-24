@@ -241,6 +241,124 @@ def _read_recent_period_dataset_if_active(mart: MartStore, active: set[str], dat
     return _read_recent_period_dataset(mart, dataset, max_periods=max_periods)
 
 
+def _partition_values_from_mart(mart: MartStore, dataset: str, partition_key: str, limit: int | None = None) -> list[str]:
+    root = mart.root / dataset
+    if not root.exists():
+        return []
+    prefix = f"{partition_key}="
+    values = sorted(
+        path.name.split("=", 1)[1]
+        for path in root.iterdir()
+        if path.is_dir() and path.name.startswith(prefix) and (path / "part.parquet").exists() and (path / "_meta.json").exists()
+    )
+    return values[-limit:] if limit is not None else values
+
+
+def _compact_source(source: Any) -> dict[str, Any]:
+    if not isinstance(source, dict):
+        return {}
+    keys = [
+        "kind",
+        "source_kind",
+        "source",
+        "api_name",
+        "fallback_for",
+        "stock_pool",
+        "start_date",
+        "end_date",
+        "request_mode",
+        "driver_dataset",
+        "driver_partition",
+        "sources_requested",
+    ]
+    return {key: _clean_value(source[key]) for key in keys if key in source and source[key] is not None}
+
+
+def _compact_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    columns = meta.get("columns") if isinstance(meta.get("columns"), list) else []
+    return {
+        "partition": _clean_value(meta.get("partition", {})),
+        "rows": _clean_value(meta.get("rows")),
+        "columns_count": len(columns),
+        "columns_sample": [_clean_value(column) for column in columns[:12]],
+        "quality_status": _clean_value(meta.get("quality_status")),
+        "published_at": _clean_value(meta.get("published_at")),
+        "source": _compact_source(meta.get("source")),
+    }
+
+
+def _unique_source_values(metas: list[dict[str, Any]], key: str) -> list[Any]:
+    values: list[Any] = []
+    seen: set[str] = set()
+    for meta in metas:
+        source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+        value = source.get(key)
+        if value is None:
+            continue
+        marker = json.dumps(_clean_value(value), ensure_ascii=False, sort_keys=True)
+        if marker not in seen:
+            seen.add(marker)
+            values.append(_clean_value(value))
+    return values
+
+
+def _date_range_source_values(metas: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    values = [str(value) for value in _unique_source_values(metas, key) if str(value)]
+    return {"min": min(values), "max": max(values)} if values else {"min": None, "max": None}
+
+
+def _metadata_source_summary(metas: list[dict[str, Any]]) -> dict[str, Any]:
+    published_at = [str(meta.get("published_at")) for meta in metas if meta.get("published_at")]
+    start_dates = _date_range_source_values(metas, "start_date")
+    end_dates = _date_range_source_values(metas, "end_date")
+    return {
+        "kinds": _unique_source_values(metas, "kind"),
+        "sources": _unique_source_values(metas, "source"),
+        "api_names": _unique_source_values(metas, "api_name"),
+        "fallback_for": _unique_source_values(metas, "fallback_for"),
+        "request_modes": _unique_source_values(metas, "request_mode"),
+        "driver_datasets": _unique_source_values(metas, "driver_dataset"),
+        "stock_pool_counts": _unique_source_values(metas, "stock_pool"),
+        "start_date_min": start_dates["min"],
+        "start_date_max": start_dates["max"],
+        "end_date_min": end_dates["min"],
+        "end_date_max": end_dates["max"],
+        "published_at_min": min(published_at) if published_at else None,
+        "published_at_max": max(published_at) if published_at else None,
+        "quality_statuses": sorted(
+            {str(meta.get("quality_status")) for meta in metas if meta.get("quality_status") is not None}
+        ),
+    }
+
+
+def _metadata_for_partitions(
+    mart: MartStore,
+    dataset: str,
+    partition_key: str,
+    values: list[str],
+    max_samples: int = 8,
+) -> dict[str, Any]:
+    metas: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for value in values:
+        meta = mart.read_meta(dataset, {partition_key: value})
+        if meta is None:
+            missing.append(value)
+        else:
+            metas.append(meta)
+    samples = metas[-max_samples:]
+    return {
+        "partition_key": partition_key,
+        "partitions_requested": len(values),
+        "partitions_with_meta": len(metas),
+        "missing_metadata_count": len(missing),
+        "missing_metadata_sample": missing[:10],
+        "latest": _compact_meta(metas[-1]) if metas else None,
+        "samples": [_compact_meta(meta) for meta in samples],
+        "source_summary": _metadata_source_summary(metas),
+    }
+
+
 def _coverage(
     dataset: str,
     partition_key: str,
@@ -715,6 +833,64 @@ def build_market_analysis_bundle(
                 }
             )
 
+    metadata_specs: dict[str, tuple[str, list[str]]] = {}
+
+    def add_metadata_spec(dataset: str, partition_key: str, values: list[str]) -> None:
+        if dataset in active:
+            metadata_specs[dataset] = (partition_key, values)
+
+    add_metadata_spec("trade_cal", "exchange", ["SSE"])
+    add_metadata_spec("stock_basic", "snapshot_date", [stock_basic_snapshot] if stock_basic_snapshot else [])
+    for dataset in ["daily", "daily_basic", "adj_factor", "stk_limit", "index_daily", "index_dailybasic", "sw_daily", "ci_daily"]:
+        add_metadata_spec(dataset, "trade_date", trade_dates)
+    for dataset in [
+        "moneyflow",
+        "moneyflow_dc",
+        "moneyflow_ths",
+        "moneyflow_ind_ths",
+        "moneyflow_ind_dc",
+        "moneyflow_cnt_ths",
+        "limit_list_d",
+        "limit_step",
+        "limit_cpt_list",
+        "top_list",
+        "margin_detail",
+        "kpl_list",
+        "limit_list_ths",
+        "ths_hot",
+        "dc_hot",
+        "moneyflow_hsgt",
+        "hsgt_top10",
+        "stock_hsgt",
+        "cyq_perf",
+        "cyq_chips",
+        "dc_index",
+        "dc_member",
+        "tdx_index",
+        "tdx_member",
+        "kpl_concept_cons",
+    ]:
+        add_metadata_spec(dataset, "trade_date", [completed])
+    for dataset, value in {
+        "index_classify": index_classify_partition,
+        "index_member_all": index_member_all_partition,
+        "ci_index_member": ci_index_member_partition,
+        "ths_index": ths_index_partition,
+        "ths_member": ths_member_partition,
+        "index_weight": index_weight_partition,
+    }.items():
+        add_metadata_spec(dataset, "snapshot_date", [value] if value else [])
+    add_metadata_spec("a_stock_notice", "publish_date", notice_dates)
+    add_metadata_spec("earnings_forecast", "publish_date", notice_dates)
+    add_metadata_spec("event_news", "news_date", news_dates)
+    for dataset in ["income", "balancesheet", "cashflow", "express", "fina_indicator", "fina_mainbz", "dividend", "fina_audit", "disclosure_date"]:
+        add_metadata_spec(dataset, "period", _partition_values_from_mart(mart, dataset, "period", limit=8))
+
+    dataset_metadata = {
+        dataset: _metadata_for_partitions(mart, dataset, partition_key, values)
+        for dataset, (partition_key, values) in metadata_specs.items()
+    }
+
     bundle: dict[str, Any] = {
         "schema": ANALYSIS_BUNDLE_SCHEMA,
         "generated_at": _now_iso(),
@@ -817,6 +993,7 @@ def build_market_analysis_bundle(
                 "mode": "current_visible_page",
                 "historical_backfill": False,
             },
+            "dataset_metadata": dataset_metadata,
         },
     }
     if include_raw_samples:

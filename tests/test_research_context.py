@@ -79,9 +79,11 @@ class ResearchContextTest(unittest.TestCase):
         self.assertEqual(context["market"]["daily_history"]["records"][0]["close"], 10.5)
         self.assertEqual(context["market"]["daily_basic_latest"]["records"][0]["pe_ttm"], 7.5)
         self.assertEqual(context["events"]["announcements"]["records"][0]["title"], "年度报告")
+        self.assertEqual(context["events"]["earnings_forecast"]["records"][0]["forecast_type"], "预增")
         self.assertTrue(any(gap["name"] == "income" and gap["status"] == "unavailable" for gap in context["data_gaps"]))
         self.assertTrue(any(source["api_name"] == "news" for source in context["skipped_sources"]))
         self.assertIn("dynamic_source_discovery", context["source_policy"])
+        self.assertFalse(any(call[0] == "forecast" for call in provider.calls))
         self.assertEqual(provider.news_calls, [])
 
     def test_build_research_context_can_include_news_when_requested(self) -> None:
