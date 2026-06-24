@@ -93,12 +93,12 @@ shibor / shibor_quote / cn_ppi / cn_gdp / sf_month / us_tltr / us_trycr / eco_ca
 
 1. 优先级：
    - 官方政府/监管/统计机构；
-   - 交易所、巨潮资讯、公司公告和定期报告；
+   - 交易所、巨潮/CNINFO、公司公告和定期报告；
    - 上市公司官网或投资者关系页面；
    - 被广泛认可的行业协会、指定数据发布机构、商品交易所或价格指数发布方。
 2. 必须记录：来源名称、URL、来源类型、查询时间、发布日期/更新日期、提取出的事实、该事实对应公司的哪个业务分部。
 3. 必须区分证据等级：`project_data / official_external / company_external / association_external / auxiliary_external`。
-4. 不能用低质量搜索结果、论坛、自媒体、匿名网页支撑关键判断。
+4. 不能用低质量搜索结果、论坛、匿名网页支撑关键判断。
 5. 订单、客户、产能、市场份额等公司级事实，必须来自公告、定期报告、公司官方披露或官方互动平台；不得使用 source_type 白名单外来源补齐这类事实。
 6. 如果找不到符合证据等级的来源，写“暂无可靠数据”。
 
@@ -136,7 +136,7 @@ shibor / shibor_quote / cn_ppi / cn_gdp / sf_month / us_tltr / us_trycr / eco_ca
    - 项目缺失时，使用允许的行情源；盘中数据优先要求用户提供券商 App、TradingView 或行情软件截图。
 2. 最新财报：
    - 优先项目 `income/balancesheet/cashflow/fina_indicator` 和公告。
-   - 项目缺失时，优先交易所、巨潮资讯等官方披露来源。
+   - 项目缺失时，优先交易所、巨潮/CNINFO 等官方披露来源。
 3. 行业和供应链动态：
    - 优先项目行业指数、行业成分、公告、业绩预告。
    - 行业通用数据按“行业特有数据动态发现流程”寻找相关官方、协会、公司、交易所或价格指数来源。

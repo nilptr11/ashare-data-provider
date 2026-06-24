@@ -12,7 +12,7 @@
 | 数据集构建检查 | `ashare data list/check/build/update` | connector、raw store、dataset catalog | mart 分区和质量状态 | 单表补数、重跑、检查分区健康 | 不做行业判断 |
 | Mart 读取 | `ashare mart read/meta` | `data/mart/{dataset}` | 表格或元数据 | Codex 直接读取行情、资金、公告、财务等事实 | 不读取 raw 响应作分析默认输入 |
 | Feature 构建读取 | `ashare feature build/read/meta` | mart 分区 | `data/features/{feature}` | 市场结构、行业强度、概念强度、龙头验证、高弹性候选 | 不输出买卖建议 |
-| 外部 Evidence | `ashare evidence ingest/search/export/adapter-*` | curated JSON/JSONL、accepted adapter | `data/evidence/records.jsonl` | 补产业、海外、政策、招投标、capex、价格、产能等项目外事实 | 不覆盖已有 mart 事实，不使用资讯作关键证据 |
+| 外部 Evidence | `ashare evidence ingest/search/export/adapter-*` | curated JSON/JSONL、accepted adapter | `data/evidence/records.jsonl` | 补产业、海外、政策、招投标、capex、价格、产能等项目外事实 | 不覆盖已有 mart 事实，只接受可追溯来源 |
 | Knowledge | `ashare knowledge propose/accept/search/snapshot` | 人工审核 proposal、evidence trace | `data/knowledge/current.jsonl` | 保存实体别名、行业链、公司产品关系等慢变量 | 不代表当日市场强弱 |
 | Context Pack | `ashare context build market-structure/industry/stock` | mart、feature、evidence、knowledge | `data/context_packs/.../context.json` | 把分析所需事实组装成 Codex 可读快照 | 不直接生成结论 |
 | Protocol 模板 | `ashare protocols list/show/validate/output-schema` | registered protocol specs | protocol spec 和输出 schema | 沉淀反复使用的分析模板和质量门 | 不替代用户当次框架 |
