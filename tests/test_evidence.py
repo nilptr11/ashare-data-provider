@@ -227,7 +227,7 @@ def test_cli_evidence_ingest_search_export_and_collect(capsys, tmp_path):
     )
     assert exit_code == 0
     collect_payload = json.loads(capsys.readouterr().out)
-    assert collect_payload["status"] == "not_collected"
+    assert collect_payload["status"] == "needs_external_sources"
 
 
 def _accepted_adapter_spec():

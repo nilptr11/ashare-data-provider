@@ -29,6 +29,3 @@ ashare = "ashare_research.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["ashare_research*"]
-
-[tool.setuptools.package-data]
-"ashare_research.protocols" = ["specs/*.json", "output_schemas/*.json"]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..protocols import ProtocolSpec
 from ..runs.manifest import RunArtifact
 
 
@@ -11,7 +10,6 @@ def render_trace_report(
     run_id: str,
     question: str,
     as_of: str,
-    protocol: ProtocolSpec,
     data_refs_artifact: RunArtifact,
     evidence_artifact: RunArtifact,
     knowledge_artifact: RunArtifact,
@@ -25,12 +23,6 @@ def render_trace_report(
         "## Question",
         "",
         question.strip(),
-        "",
-        "## Protocol",
-        "",
-        f"- protocol_id: `{protocol.protocol_id}`",
-        f"- version: `{protocol.version}`",
-        f"- output_schema: `{protocol.output_schema}`",
         "",
         "## Inputs",
         "",

@@ -28,7 +28,6 @@ from .knowledge import KnowledgeStore, proposal_rows, taxonomy_payload
 from .marts.publisher import MartPublisher
 from .marts.reader import MartReader
 from .output import emit
-from .protocols import ProtocolRegistry
 from .raw_store import RawStore
 from .runs import RunRecorder, replay_run
 from .schemas import AShareResearchError, DatasetSpec, SourceResponse
@@ -106,6 +105,9 @@ def build_parser() -> argparse.ArgumentParser:
     mart_read.add_argument("--snapshot-date", help="快捷分区参数：snapshot_date")
     mart_read.add_argument("--period", help="快捷分区参数：period")
     mart_read.add_argument("--latest", action="store_true", help="读取最新分区")
+    mart_read.add_argument("--columns", help="逗号分隔输出列")
+    mart_read.add_argument("--sort", help="按列排序后再输出")
+    mart_read.add_argument("--ascending", action="store_true", help="升序排序；默认降序")
     mart_read.add_argument("--limit", type=int, default=20)
     mart_read.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
 
@@ -122,6 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     feature_list = feature_subparsers.add_parser("list", help="列出注册 feature 和已发布分区")
     feature_list.add_argument("--format", choices=("table", "json", "csv"), default="table")
+    feature_list.add_argument("--all-partitions", action="store_true", help="列出所有历史 feature 分区；默认只显示最新分区摘要")
 
     feature_build = feature_subparsers.add_parser("build", help="构建一个 feature")
     feature_build.add_argument("feature", choices=[spec.name for spec in FeatureRegistry.builtin().list()])
@@ -134,6 +137,9 @@ def build_parser() -> argparse.ArgumentParser:
     feature_read.add_argument("feature", choices=[spec.name for spec in FeatureRegistry.builtin().list()])
     feature_read.add_argument("--as-of", required=True)
     feature_read.add_argument("--window", type=int, required=True)
+    feature_read.add_argument("--columns", help="逗号分隔输出列")
+    feature_read.add_argument("--sort", help="按列排序后再输出")
+    feature_read.add_argument("--ascending", action="store_true", help="升序排序；默认降序")
     feature_read.add_argument("--limit", type=int, default=20)
     feature_read.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
 
@@ -234,24 +240,6 @@ def build_parser() -> argparse.ArgumentParser:
     knowledge_taxonomy = knowledge_subparsers.add_parser("taxonomy", help="显示 knowledge 实体类型和关系白名单")
     knowledge_taxonomy.add_argument("--format", choices=("json", "table"), default="json")
 
-    protocols_parser = subparsers.add_parser("protocols", help="可复用分析模板和输出质量门")
-    protocols_subparsers = protocols_parser.add_subparsers(dest="protocols_command", required=True)
-
-    protocols_list = protocols_subparsers.add_parser("list", help="列出可复用 protocol 模板")
-    protocols_list.add_argument("--format", choices=("table", "json", "csv"), default="table")
-
-    protocols_show = protocols_subparsers.add_parser("show", help="显示一个 protocol 模板")
-    protocols_show.add_argument("protocol_id")
-    protocols_show.add_argument("--format", choices=("table", "json"), default="json")
-
-    protocols_validate = protocols_subparsers.add_parser("validate", help="校验可复用 protocol 模板")
-    protocols_validate.add_argument("protocol_id", nargs="?")
-    protocols_validate.add_argument("--format", choices=("table", "json"), default="json")
-
-    protocols_output_schema = protocols_subparsers.add_parser("output-schema", help="显示 protocol 输出 JSON Schema")
-    protocols_output_schema.add_argument("protocol_id")
-    protocols_output_schema.add_argument("--format", choices=("json",), default="json")
-
     runs_parser = subparsers.add_parser("runs", help="记录和回放分析 run 留痕")
     runs_subparsers = runs_parser.add_subparsers(dest="runs_command", required=True)
 
@@ -259,8 +247,6 @@ def build_parser() -> argparse.ArgumentParser:
     runs_record.add_argument("--question")
     runs_record.add_argument("--question-file")
     runs_record.add_argument("--as-of", required=True)
-    runs_record.add_argument("--protocol", help="可选注册 protocol；不传则按用户当次指令记录为 user_directed.v1")
-    runs_record.add_argument("--ad-hoc-protocol")
     runs_record.add_argument("--mart-ref", action="append", default=[], help="本次分析引用的 mart 分区，格式 DATASET:key=value[,key=value]")
     runs_record.add_argument("--feature-ref", action="append", default=[], help="本次分析引用的 feature 分区，格式 FEATURE:as_of=YYYYMMDD,window=N")
     runs_record.add_argument("--evidence")
@@ -304,8 +290,6 @@ def main(argv: list[str] | None = None) -> int:
             return _handle_evidence(args, reader)
         if args.command == "knowledge":
             return _handle_knowledge(args, reader)
-        if args.command == "protocols":
-            return _handle_protocols(args)
         if args.command == "runs":
             return _handle_runs(args, reader)
     except AShareResearchError as error:
@@ -925,19 +909,32 @@ def _enrich_member_frame(
     fallback_driver_code: str | None = None,
 ) -> pd.DataFrame:
     output = frame.copy()
-    member_code_column = _first_existing_column(output, (spec.driver_code_param, "_driver_ts_code", "index_code", "ts_code"))
-    if member_code_column:
-        output["_driver_ts_code"] = output[member_code_column].astype(str)
+    if "con_code" in output.columns and spec.driver_code_param in output.columns:
+        member_code_column = spec.driver_code_param
     elif fallback_driver_code:
-        output["_driver_ts_code"] = fallback_driver_code
+        member_code_column = None
+    else:
+        member_code_column = _first_existing_column(output, (spec.driver_code_param, "_driver_ts_code", "index_code", "ts_code"))
+    if member_code_column:
+        output["_driver_ts_code"] = _string_series(output[member_code_column])
+    elif fallback_driver_code:
+        output["_driver_ts_code"] = str(fallback_driver_code).strip()
+    if "con_code" in output.columns:
+        output["ts_code"] = _string_series(output["con_code"])
+    if "con_name" in output.columns and "name" not in output.columns:
+        output["name"] = _string_series(output["con_name"])
     if name_column and "_driver_ts_code" in output.columns:
         names = {
-            str(row[code_column]): str(row[name_column])
+            str(row[code_column]).strip(): str(row[name_column])
             for row in driver[[code_column, name_column]].dropna(subset=[code_column]).to_dict("records")
         }
         output["_driver_name"] = output["_driver_ts_code"].map(names).fillna("")
     output["_driver_dataset"] = spec.driver_dataset
     return output
+
+
+def _string_series(series: pd.Series) -> pd.Series:
+    return series.map(lambda value: "" if pd.isna(value) else str(value).strip())
 
 
 def _build_stock_pool_daily_dataset(args: argparse.Namespace, reader: MartReader, spec: DatasetSpec) -> dict[str, object]:
@@ -1120,13 +1117,56 @@ def _partition_value(partition: dict[str, str]) -> str:
 def _handle_mart(args: argparse.Namespace, reader: MartReader) -> int:
     partition = _partition_args(args)
     if args.mart_command == "read":
-        frame = reader.read_partition(args.dataset, partition, limit=args.limit)
+        frame = reader.read_partition(args.dataset, partition, columns=_read_columns(args), limit=None)
+        frame = _shape_read_frame(frame, columns=_output_columns(args), sort=args.sort, ascending=args.ascending, limit=args.limit)
         emit(frame, fmt=args.format)
         return 0
     if args.mart_command == "meta":
         emit(reader.load_meta(args.dataset, partition).to_dict(), fmt="json")
         return 0
     raise AShareResearchError(f"unknown mart command: {args.mart_command}")
+
+
+def _parse_columns(raw: str | None) -> list[str] | None:
+    if not raw:
+        return None
+    columns = [item.strip() for item in raw.split(",") if item.strip()]
+    return columns or None
+
+
+def _output_columns(args: argparse.Namespace) -> list[str] | None:
+    return _parse_columns(getattr(args, "columns", None))
+
+
+def _read_columns(args: argparse.Namespace) -> list[str] | None:
+    columns = _output_columns(args)
+    sort_column = getattr(args, "sort", None)
+    if columns and sort_column and sort_column not in columns:
+        return [*columns, sort_column]
+    return columns
+
+
+def _shape_read_frame(
+    frame: pd.DataFrame,
+    *,
+    columns: list[str] | None,
+    sort: str | None,
+    ascending: bool,
+    limit: int | None,
+) -> pd.DataFrame:
+    output = frame
+    if sort:
+        if sort not in output.columns:
+            raise AShareResearchError(f"sort column not found: {sort}")
+        output = output.sort_values(sort, ascending=ascending)
+    if limit is not None and limit > 0:
+        output = output.head(limit)
+    if columns:
+        missing = [column for column in columns if column not in output.columns]
+        if missing:
+            raise AShareResearchError(f"columns not found: {missing}")
+        output = output[columns]
+    return output
 
 
 def _add_data_build_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser], name: str, help_text: str) -> None:
@@ -1159,12 +1199,16 @@ def _handle_feature(args: argparse.Namespace, reader: MartReader) -> int:
     store = FeatureStore(reader.data_dir)
     registry = FeatureRegistry.builtin()
     if args.feature_command == "list":
-        registered = [spec.to_dict() | {"published": False, "as_of": "", "window": ""} for spec in registry.list()]
-        published = [
-            {"name": row["feature"], "published": True, "as_of": row["as_of"], "window": row["window"], "path": row["path"]}
-            for row in store.discover()
-        ]
-        emit([*registered, *published], fmt=args.format)
+        partitions = store.discover()
+        if args.all_partitions:
+            registered = [spec.to_dict() | {"published": False, "as_of": "", "window": ""} for spec in registry.list()]
+            published = [
+                {"name": row["feature"], "published": True, "as_of": row["as_of"], "window": row["window"], "path": row["path"]}
+                for row in partitions
+            ]
+            emit([*registered, *published], fmt=args.format)
+        else:
+            emit([_feature_list_row(spec, partitions) for spec in registry.list()], fmt=args.format)
         return 0
     if args.feature_command == "build":
         windows = _parse_windows(args.windows)
@@ -1173,13 +1217,43 @@ def _handle_feature(args: argparse.Namespace, reader: MartReader) -> int:
         emit(results, fmt=args.format)
         return 0
     if args.feature_command == "read":
-        frame = store.read_partition(args.feature, as_of=args.as_of, window=args.window, limit=args.limit)
+        frame = store.read_partition(args.feature, as_of=args.as_of, window=args.window)
+        frame = _shape_read_frame(frame, columns=_output_columns(args), sort=args.sort, ascending=args.ascending, limit=args.limit)
         emit(frame, fmt=args.format)
         return 0
     if args.feature_command == "meta":
         emit(store.load_meta(args.feature, as_of=args.as_of, window=args.window).to_dict(), fmt="json")
         return 0
     raise AShareResearchError(f"unknown feature command: {args.feature_command}")
+
+
+def _feature_list_row(spec, partitions: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = [row for row in partitions if row["feature"] == spec.name]
+    payload = spec.to_dict()
+    if not rows:
+        return payload | {
+            "published": False,
+            "partition_count": 0,
+            "latest_as_of": "",
+            "latest_windows": [],
+            "latest_partitions": [],
+        }
+    latest_as_of = max(str(row["as_of"]) for row in rows)
+    latest_rows = sorted((row for row in rows if str(row["as_of"]) == latest_as_of), key=lambda row: int(row["window"]))
+    return payload | {
+        "published": True,
+        "partition_count": len(rows),
+        "latest_as_of": latest_as_of,
+        "latest_windows": [int(row["window"]) for row in latest_rows],
+        "latest_partitions": [
+            {
+                "as_of": row["as_of"],
+                "window": row["window"],
+                "path": row["path"],
+            }
+            for row in latest_rows
+        ],
+    }
 
 
 def _handle_evidence(args: argparse.Namespace, reader: MartReader) -> int:
@@ -1308,28 +1382,9 @@ def _handle_knowledge(args: argparse.Namespace, reader: MartReader) -> int:
     raise AShareResearchError(f"unknown knowledge command: {args.knowledge_command}")
 
 
-def _handle_protocols(args: argparse.Namespace) -> int:
-    registry = ProtocolRegistry.builtin()
-    if args.protocols_command == "list":
-        emit([spec.to_dict() for spec in registry.list()], fmt=args.format)
-        return 0
-    if args.protocols_command == "show":
-        emit(registry.require(args.protocol_id).to_dict(), fmt=args.format)
-        return 0
-    if args.protocols_command == "validate":
-        emit(registry.validate(args.protocol_id), fmt=args.format)
-        return 0
-    if args.protocols_command == "output-schema":
-        spec = registry.require(args.protocol_id)
-        emit(registry.output_schema(spec.output_schema or ""), fmt=args.format)
-        return 0
-    raise AShareResearchError(f"unknown protocols command: {args.protocols_command}")
-
-
 def _handle_runs(args: argparse.Namespace, reader: MartReader) -> int:
     if args.runs_command == "record":
         question = _load_question(args)
-        ad_hoc_protocol = _load_json_file(Path(args.ad_hoc_protocol)) if args.ad_hoc_protocol else None
         validated_output = _load_json_file(Path(args.validated_output)) if args.validated_output else None
         agent_reasoning = _load_json_file(Path(args.agent_reasoning)) if args.agent_reasoning else None
         model_output = Path(args.model_output_file).read_text(encoding="utf-8") if args.model_output_file else None
@@ -1338,8 +1393,6 @@ def _handle_runs(args: argparse.Namespace, reader: MartReader) -> int:
         payload = recorder.record(
             question=question,
             as_of=args.as_of,
-            protocol_id=args.protocol,
-            ad_hoc_protocol=ad_hoc_protocol,
             mart_refs=args.mart_ref,
             feature_refs=args.feature_ref,
             evidence_path=Path(args.evidence) if args.evidence else None,

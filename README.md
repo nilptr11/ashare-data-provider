@@ -20,7 +20,28 @@
 | --- | --- | --- |
 | 数据事实层 | `data/mart`、`data/features`、`data/evidence`、`data/knowledge` | 提供事实、信号、证据和 accepted 慢变量 |
 | 研究纪律层 | `SKILL.md`、`references/data-map.md`、`references/source-registry.md`、`references/reasoning-policy.md`、`references/dataset-index.md` | 告诉 LLM 怎么读数据、怎么降级、哪些结论不能越界 |
-| 留痕层 | `runs`、`reports`、`industry_chain_selection.v1` | 记录一次研究用了什么材料；可选地校验结构化输出 |
+| 留痕层 | `runs`、`reports` | 记录一次研究用了什么材料和质量检查结果 |
+
+## 系统架构
+
+```text
+用户问题 / 交易模式 / 研究假设
+  -> LLM 临时归一化研究约束
+     - 主要矛盾
+     - 优先数据
+     - 证据要求
+     - 失效条件
+  -> 读取最小必要数据
+     - mart：结构化事实
+     - feature：筛查、排序、交叉验证信号
+     - evidence：外部产业证据
+     - knowledge：accepted 慢变量关系
+  -> 按 reasoning-policy 区分事实、推断、假设和缺口
+  -> 输出研究结论
+  -> 可选：用 runs 做留痕和质量检查
+```
+
+用户输入的交易模式用于帮助 LLM 决定“先看什么、什么能证明、什么只能作为线索”。
 
 ## 默认使用方式
 
@@ -76,6 +97,7 @@ uv run ashare feature meta FEATURE --as-of YYYYMMDD --window 20
 ```bash
 uv run ashare mart read daily --trade-date YYYYMMDD --limit 20 --format json
 uv run ashare feature read concept_strength --as-of YYYYMMDD --window 20 --limit 50 --format json
+uv run ashare feature read concept_strength --as-of YYYYMMDD --window 20 --columns ts_code,name,strength_score --sort strength_score --limit 30 --format json
 uv run ashare evidence search --industry INDUSTRY --format json
 uv run ashare knowledge search --entity ENTITY --format json
 ```
@@ -93,8 +115,6 @@ uv run ashare knowledge accept PROPOSAL_ID
 记录研究留痕：
 
 ```bash
-uv run ashare protocols list
-uv run ashare protocols output-schema industry_chain_selection.v1
 uv run ashare runs record --question "..." --as-of YYYYMMDD --mart-ref daily:trade_date=YYYYMMDD --feature-ref market_strength:as_of=YYYYMMDD,window=20
 ```
 

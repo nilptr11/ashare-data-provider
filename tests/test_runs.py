@@ -33,7 +33,6 @@ def test_run_recorder_records_and_replays(tmp_path):
     assert data_refs["validation"]["status"] == "ready"
     assert data_refs["marts"][0]["status"] == "ready"
     assert data_refs["features"][0]["status"] == "ready"
-    assert manifest["protocol_id"] == "user_directed.v1"
     assert manifest["agent_reasoning"]["status"] == "not_provided"
     assert manifest["quality_gates"]["status"] == "warning"
     assert manifest["quality_gates"]["gates"]["data_refs_gate"]["status"] == "passed"
@@ -44,39 +43,21 @@ def test_run_recorder_records_and_replays(tmp_path):
     assert any(item["kind"] == "data_refs" for item in replay["artifacts"])
 
 
-def test_run_recorder_uses_registered_protocol_when_requested(tmp_path):
-    _write_run_data_refs(tmp_path)
-    recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
-
-    manifest = recorder.record(
-        question="按主线选股与产业链拆解协议分析 AI 算力硬件链",
-        as_of="20260623",
-        protocol_id="industry_chain_selection.v1",
-        mart_refs=["daily:trade_date=20260623"],
-        feature_refs=["market_strength:as_of=20260623,window=20"],
-        run_id="registered_protocol_run",
-    )
-
-    assert manifest["protocol_id"] == "industry_chain_selection.v1"
-    assert manifest["quality_gates"]["status"] == "warning"
-
-
 def test_run_recorder_passes_supported_validated_output(tmp_path):
     _write_run_data_refs(tmp_path)
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
-        question="按主线选股与产业链拆解协议分析 AI 算力硬件链",
+        question="分析 AI 算力硬件链",
         as_of="20260623",
-        protocol_id="industry_chain_selection.v1",
         mart_refs=["daily:trade_date=20260623"],
         feature_refs=["market_strength:as_of=20260623,window=20"],
-        validated_output=_industry_chain_output(),
+        validated_output=_research_output(),
         run_id="supported_output_run",
     )
 
     assert manifest["quality_gates"]["status"] == "passed"
-    assert manifest["quality_gates"]["gates"]["schema_gate"]["status"] == "passed"
+    assert manifest["quality_gates"]["gates"]["output_gate"]["status"] == "passed"
     assert manifest["quality_gates"]["gates"]["source_gate"]["status"] == "passed"
     assert manifest["quality_gates"]["gates"]["confidence_gate"]["status"] == "passed"
 
@@ -86,12 +67,11 @@ def test_run_recorder_blocks_core_candidate_without_exposure_source(tmp_path):
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
-        question="按主线选股与产业链拆解协议分析 AI 算力硬件链",
+        question="分析 AI 算力硬件链",
         as_of="20260623",
-        protocol_id="industry_chain_selection.v1",
         mart_refs=["daily:trade_date=20260623"],
         feature_refs=["market_strength:as_of=20260623,window=20"],
-        validated_output=_industry_chain_output(exposure_source_kind="feature"),
+        validated_output=_research_output(exposure_source_kind="feature"),
         run_id="feature_only_exposure_run",
     )
 
@@ -106,12 +86,11 @@ def test_run_recorder_blocks_core_candidate_with_weak_evidence(tmp_path):
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
-        question="按主线选股与产业链拆解协议分析 AI 算力硬件链",
+        question="分析 AI 算力硬件链",
         as_of="20260623",
-        protocol_id="industry_chain_selection.v1",
         mart_refs=["daily:trade_date=20260623"],
         feature_refs=["market_strength:as_of=20260623,window=20"],
-        validated_output=_industry_chain_output(evidence_strength="weak"),
+        validated_output=_research_output(evidence_strength="weak"),
         run_id="weak_core_evidence_run",
     )
 
@@ -188,7 +167,6 @@ def test_cli_runs_record_list_replay(capsys, tmp_path):
     assert exit_code == 0
     record_payload = json.loads(capsys.readouterr().out)
     run_dir = record_payload["path"]
-    assert record_payload["protocol_id"] == "user_directed.v1"
     assert record_payload["agent_reasoning"]["status"] == "provided"
 
     exit_code = main(["--data-dir", str(tmp_path), "runs", "list", "--runs-dir", str(runs_dir), "--format", "json"])
@@ -202,7 +180,7 @@ def test_cli_runs_record_list_replay(capsys, tmp_path):
     assert replay_payload["status"] == "replayable"
 
 
-def _industry_chain_output(*, exposure_source_kind="evidence", evidence_strength="strong"):
+def _research_output(*, exposure_source_kind="evidence", evidence_strength="strong"):
     exposure_fact = {
         "source_kind": exposure_source_kind,
         "source_id": "evidence:ai-infra-order",
@@ -214,15 +192,9 @@ def _industry_chain_output(*, exposure_source_kind="evidence", evidence_strength
         "claim": "当日行情分区可用",
     }
     return {
-        "schema": "ashare.protocol_output.industry_chain_selection.v1",
+        "schema": "ashare.research_output.v1",
         "as_of": "20260623",
-        "question": "按主线选股与产业链拆解协议分析 AI 算力硬件链",
-        "research_scope": {
-            "objective": "验证 AI 算力硬件链候选",
-            "system_positioning": "研究输出，不是交易指令",
-            "non_goals": ["不输出交易指令"],
-            "research_states": ["core_research", "elastic_watch", "laggard_watch", "evidence_needed", "excluded"],
-        },
+        "question": "分析 AI 算力硬件链",
         "theme_identification": {
             "summary": "AI 算力硬件链存在市场关注线索",
             "facts": [market_fact],
@@ -288,7 +260,7 @@ def _industry_chain_output(*, exposure_source_kind="evidence", evidence_strength
             {
                 "ts_code": "000001.SZ",
                 "name": "测试公司",
-                "research_state": "core_research",
+                "priority": "high",
                 "rationale": "公司暴露度和市场数据均有可追溯引用",
                 "evidence_strength": evidence_strength,
                 "missing_evidence": [],

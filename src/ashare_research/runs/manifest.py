@@ -23,10 +23,7 @@ class RunManifest:
     run_id: str
     created_at: str
     as_of: str
-    protocol_id: str
-    protocol_version: str
     question: RunArtifact
-    protocol: RunArtifact
     data_refs: RunArtifact | None = None
     evidence: RunArtifact | None = None
     knowledge: RunArtifact | None = None
@@ -41,10 +38,7 @@ class RunManifest:
             "run_id": self.run_id,
             "created_at": self.created_at,
             "as_of": self.as_of,
-            "protocol_id": self.protocol_id,
-            "protocol_version": self.protocol_version,
             "question": self.question.to_dict(),
-            "protocol": self.protocol.to_dict(),
             "data_refs": self.data_refs.to_dict() if self.data_refs else None,
             "evidence": self.evidence.to_dict() if self.evidence else None,
             "knowledge": self.knowledge.to_dict() if self.knowledge else None,

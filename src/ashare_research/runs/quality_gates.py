@@ -2,33 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..protocols import ProtocolSpec
-
-
-INDUSTRY_CHAIN_SCHEMA = "ashare.protocol_output.industry_chain_selection.v1"
-INDUSTRY_CHAIN_REQUIRED_FIELDS = (
-    "schema",
-    "as_of",
-    "question",
-    "research_scope",
-    "theme_identification",
-    "industry_chain_map",
-    "revaluation_segments",
-    "company_mapping",
-    "candidate_pool",
-    "evidence_matrix",
-    "data_gaps",
-    "follow_up_plan",
-    "invalid_if",
-    "confidence",
-)
 STRONG_EXPOSURE_SOURCE_KINDS = {"mart", "evidence", "knowledge"}
 WEAK_VERIFICATIONS = {"unverified", "stale"}
+HIGH_PRIORITY_VALUES = {"core", "high", "primary", "重点", "优先"}
 
 
 def evaluate_quality_gates(
     *,
-    protocol: ProtocolSpec,
     data_refs: dict[str, Any],
     as_of: str,
     has_validated_output: bool,
@@ -38,10 +18,10 @@ def evaluate_quality_gates(
 ) -> dict[str, Any]:
     output = validated_output if has_validated_output else None
     gates = {
-        "schema_gate": _schema_gate(protocol, as_of, output),
+        "output_gate": _output_gate(as_of, output),
         "freshness_gate": _freshness_gate(data_refs, as_of),
         "data_refs_gate": _data_refs_gate(data_refs),
-        "gap_gate": _gap_gate(protocol, data_refs, output),
+        "gap_gate": _gap_gate(data_refs, output),
         "source_gate": _source_gate(evidence_artifact, knowledge_artifact, output),
         "confidence_gate": _confidence_gate(output),
     }
@@ -57,23 +37,16 @@ def evaluate_quality_gates(
     }
 
 
-def _schema_gate(protocol: ProtocolSpec, as_of: str, output: dict[str, Any] | None) -> dict[str, Any]:
+def _output_gate(as_of: str, output: dict[str, Any] | None) -> dict[str, Any]:
     if output is None:
         return _gate("not_evaluated", "validated output not provided")
     if not isinstance(output, dict):
         return _gate("blocked", "validated output must be a JSON object")
 
     errors: list[str] = []
-    expected_schema = protocol.output_schema
-    actual_schema = str(output.get("schema") or "")
-    if expected_schema and actual_schema != expected_schema:
-        errors.append(f"schema mismatch: expected {expected_schema}, got {actual_schema or '<missing>'}")
-    if actual_schema == INDUSTRY_CHAIN_SCHEMA:
-        missing = [field for field in INDUSTRY_CHAIN_REQUIRED_FIELDS if field not in output]
-        if missing:
-            errors.append(f"missing required output fields: {missing}")
-        if str(output.get("as_of") or "") != as_of:
-            errors.append(f"as_of mismatch: expected {as_of}, got {output.get('as_of') or '<missing>'}")
+    output_as_of = output.get("as_of")
+    if output_as_of is not None and str(output_as_of) != as_of:
+        errors.append(f"as_of mismatch: expected {as_of}, got {output_as_of}")
 
     if errors:
         return _gate("blocked", "; ".join(errors), {"errors": errors})
@@ -92,7 +65,7 @@ def _freshness_gate(data_refs: dict[str, Any], as_of: str) -> dict[str, Any]:
     return _gate("passed", "")
 
 
-def _gap_gate(protocol: ProtocolSpec, data_refs: dict[str, Any], output: dict[str, Any] | None) -> dict[str, Any]:
+def _gap_gate(data_refs: dict[str, Any], output: dict[str, Any] | None) -> dict[str, Any]:
     marts = data_refs.get("marts", [])
     features = data_refs.get("features", [])
     gaps = _items(output, "data_gaps")
@@ -100,21 +73,10 @@ def _gap_gate(protocol: ProtocolSpec, data_refs: dict[str, Any], output: dict[st
     degraded_gaps = [gap for gap in gaps if gap.get("impact") == "degrade"]
     if blocking_gaps:
         return _gate("blocked", "validated output contains blocking data gaps", {"gaps": blocking_gaps})
-    if protocol.required_inputs and not marts and not features:
+    if not marts and not features:
         return _gate("warning", "no mart or feature refs recorded; data coverage must be checked from run notes")
     if degraded_gaps:
         return _gate("degraded", "validated output contains degrading data gaps", {"gaps": degraded_gaps})
-    evidence_needed = [
-        _candidate_label(candidate)
-        for candidate in _items(output, "candidate_pool")
-        if candidate.get("research_state") == "evidence_needed"
-    ]
-    if evidence_needed and not _items(output, "follow_up_plan"):
-        return _gate(
-            "warning",
-            "evidence_needed candidates require follow_up_plan items",
-            {"candidates": evidence_needed},
-        )
     return _gate("passed", "")
 
 
@@ -162,31 +124,22 @@ def _confidence_gate(output: dict[str, Any] | None) -> dict[str, Any]:
 
     candidates = _items(output, "candidate_pool")
     evidence = _items(output, "evidence_matrix")
-    weak_core = [
+    weak_high_priority = [
         _candidate_label(candidate)
         for candidate in candidates
-        if candidate.get("research_state") == "core_research" and candidate.get("evidence_strength") == "weak"
+        if _is_high_priority(candidate) and candidate.get("evidence_strength") == "weak"
     ]
-    if weak_core:
-        return _gate("blocked", "core_research candidates cannot have weak evidence", {"candidates": weak_core})
+    if weak_high_priority:
+        return _gate("blocked", "high-priority candidates cannot have weak evidence", {"candidates": weak_high_priority})
 
     warnings: dict[str, Any] = {}
-    core_with_missing = [
+    priority_with_missing = [
         _candidate_label(candidate)
         for candidate in candidates
-        if candidate.get("research_state") == "core_research" and candidate.get("missing_evidence")
+        if _is_high_priority(candidate) and candidate.get("missing_evidence")
     ]
-    if core_with_missing:
-        warnings["core_candidates_with_missing_evidence"] = core_with_missing
-
-    weak_watch = [
-        _candidate_label(candidate)
-        for candidate in candidates
-        if candidate.get("research_state") in {"elastic_watch", "laggard_watch"}
-        and candidate.get("evidence_strength") == "weak"
-    ]
-    if weak_watch:
-        warnings["watch_candidates_with_weak_evidence"] = weak_watch
+    if priority_with_missing:
+        warnings["high_priority_candidates_with_missing_evidence"] = priority_with_missing
 
     weak_high_evidence = [
         item.get("source_id") or item.get("claim") or item.get("topic")
@@ -225,16 +178,15 @@ def _unsupported_company_exposure(output: dict[str, Any] | None) -> list[dict[st
             )
 
     for candidate in _items(output, "candidate_pool"):
-        if candidate.get("research_state") != "core_research":
-            continue
         mapping = mapping_by_code.get(str(candidate.get("ts_code") or ""))
-        if not mapping or not _has_strong_exposure(mapping):
+        has_claim = candidate.get("exposure_level") in {"core", "direct"} or _is_high_priority(candidate)
+        if has_claim and (not mapping or not _has_strong_exposure(mapping)):
             unsupported.append(
                 {
                     "scope": "candidate_pool",
                     "ts_code": candidate.get("ts_code"),
                     "name": candidate.get("name"),
-                    "research_state": candidate.get("research_state"),
+                    "priority": candidate.get("priority") or candidate.get("research_priority") or candidate.get("tier"),
                     "source_kinds": _source_kinds((mapping or {}).get("exposure_evidence")),
                 }
             )
@@ -266,6 +218,15 @@ def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
 
 def _candidate_label(candidate: dict[str, Any]) -> str:
     return str(candidate.get("ts_code") or candidate.get("name") or "<unknown>")
+
+
+def _is_high_priority(candidate: dict[str, Any]) -> bool:
+    values = {
+        str(candidate.get("priority") or "").lower(),
+        str(candidate.get("research_priority") or "").lower(),
+        str(candidate.get("tier") or "").lower(),
+    }
+    return bool(values & HIGH_PRIORITY_VALUES)
 
 
 def _gate(status: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -21,6 +21,14 @@ def test_builtin_catalog_contains_core_market_contracts():
     assert index_member_all.page_limit == 3000
     assert {"l1_code", "l2_code", "l3_code", "ts_code"} <= set(index_member_all.required_columns)
 
+    ths_member = catalog.require("ths_member")
+    assert ths_member.required_columns == ("_driver_ts_code", "ts_code")
+    assert {"ts_code", "con_code", "con_name"} <= set(ths_member.default_fields)
+
+    dc_member = catalog.require("dc_member")
+    assert dc_member.required_columns == ("_driver_ts_code", "ts_code")
+    assert {"trade_date", "ts_code", "con_code", "name"} <= set(dc_member.default_fields)
+
     hsgt_top10 = catalog.require("hsgt_top10")
     assert {"amount", "net_amount", "buy", "sell"} <= set(hsgt_top10.required_columns)
     assert {"amount", "net_amount", "buy", "sell"} <= set(hsgt_top10.default_fields)

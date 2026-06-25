@@ -14,7 +14,6 @@ from ..features import FeatureRegistry, FeatureStore
 from ..knowledge import KnowledgeStore
 from ..marts.reader import MartReader
 from ..paths import default_data_dir, default_runs_dir
-from ..protocols import ProtocolRegistry, ProtocolSpec
 from ..reports import render_trace_report
 from ..schemas import AShareResearchError
 from .manifest import RunArtifact, RunManifest
@@ -35,8 +34,6 @@ class RunRecorder:
         *,
         question: str,
         as_of: str,
-        protocol_id: str | None = None,
-        ad_hoc_protocol: dict[str, Any] | None = None,
         mart_refs: list[str] | None = None,
         feature_refs: list[str] | None = None,
         evidence_path: Path | str | None = None,
@@ -48,13 +45,11 @@ class RunRecorder:
         run_id: str | None = None,
     ) -> dict[str, Any]:
         created_at = _now_iso()
-        protocol = self._load_protocol(protocol_id, ad_hoc_protocol, question=question)
-        run_name = run_id or f"{_timestamp_for_id(created_at)}_{_slug(protocol.protocol_id)}"
+        run_name = run_id or f"{_timestamp_for_id(created_at)}_{_slug(question)[:48]}"
         run_dir = self.runs_dir / run_name
         run_dir.mkdir(parents=True, exist_ok=False)
 
         question_artifact = self._write_text(run_dir / "question.md", question, kind="question")
-        protocol_artifact = self._write_json(run_dir / "protocol.json", protocol.to_dict(), kind="protocol")
         data_refs_payload = self._data_refs_payload(as_of=as_of, mart_refs=mart_refs or [], feature_refs=feature_refs or [])
         data_refs_artifact = self._write_json(run_dir / "data_refs.json", data_refs_payload, kind="data_refs")
         evidence_artifact = self._copy_or_create_evidence(run_dir, evidence_path)
@@ -65,7 +60,6 @@ class RunRecorder:
         reasoning_payload = agent_reasoning or _empty_agent_reasoning()
         reasoning_artifact = self._write_json(run_dir / "agent_reasoning.json", reasoning_payload, kind="agent_reasoning")
         quality_payload = evaluate_quality_gates(
-            protocol=protocol,
             data_refs=data_refs_payload,
             as_of=as_of,
             has_validated_output=validated_output is not None,
@@ -78,7 +72,6 @@ class RunRecorder:
             run_id=run_name,
             question=question,
             as_of=as_of,
-            protocol=protocol,
             data_refs_artifact=data_refs_artifact,
             evidence_artifact=evidence_artifact,
             knowledge_artifact=knowledge_artifact,
@@ -90,10 +83,7 @@ class RunRecorder:
             run_id=run_name,
             created_at=created_at,
             as_of=as_of,
-            protocol_id=protocol.protocol_id,
-            protocol_version=protocol.version,
             question=question_artifact,
-            protocol=protocol_artifact,
             data_refs=data_refs_artifact,
             evidence=evidence_artifact,
             knowledge=knowledge_artifact,
@@ -124,19 +114,11 @@ class RunRecorder:
                 {
                     "run_id": payload.get("run_id", run_dir.name),
                     "as_of": payload.get("as_of"),
-                    "protocol_id": payload.get("protocol_id"),
                     "quality_status": payload.get("quality_gates", {}).get("status"),
                     "path": str(run_dir),
                 }
             )
         return rows
-
-    def _load_protocol(self, protocol_id: str | None, ad_hoc_protocol: dict[str, Any] | None, *, question: str) -> ProtocolSpec:
-        if ad_hoc_protocol is not None:
-            return ProtocolSpec.from_dict(ad_hoc_protocol)
-        if not protocol_id:
-            return _user_directed_protocol(question)
-        return ProtocolRegistry.builtin().require(protocol_id)
 
     def _data_refs_payload(self, *, as_of: str, mart_refs: list[str], feature_refs: list[str]) -> dict[str, Any]:
         marts = [self._validated_mart_ref(ref) for ref in mart_refs]
@@ -302,26 +284,6 @@ def _missing_status(error: Exception) -> str:
     if "missing" in text or "no mart partition" in text:
         return "missing"
     return "read_error"
-
-
-def _user_directed_protocol(question: str) -> ProtocolSpec:
-    return ProtocolSpec(
-        protocol_id="user_directed.v1",
-        title="用户当次指令",
-        version="v1",
-        status="ad_hoc_protocol",
-        description="未指定注册协议时，分析约束以用户当次问题和对话中给出的框架为准。",
-        required_inputs=("user_selected_data",),
-        optional_inputs=("mart_refs", "feature_refs", "evidence_records", "knowledge_snapshot"),
-        required_sections=("user_requested_output",),
-        forbidden=(
-            "Do not use reports/runs as factual source",
-            "Do not state unsupported certainty when evidence or mart data is missing",
-        ),
-        output_schema=None,
-        gap_policy={"missing_market_data": "warn", "missing_external_evidence": "warn", "missing_knowledge": "warn"},
-        quality_gates=("freshness_gate", "gap_gate", "source_gate", "confidence_gate"),
-    )
 
 
 def _empty_agent_reasoning() -> dict[str, Any]:

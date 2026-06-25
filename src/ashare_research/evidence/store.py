@@ -114,8 +114,8 @@ class EvidenceStore:
             "schema": "ashare.evidence_collection_gap.v1",
             "question": question,
             "as_of": as_of,
-            "status": "not_collected",
-            "message": "Open-ended external collection is not automated; ingest curated evidence or run accepted adapter specs.",
+            "status": "needs_external_sources",
+            "message": "Fetch authoritative sources from the source registry, then ingest curated evidence or run accepted adapter specs.",
         }
 
     def adapter_candidates(self, *, min_records: int = 3) -> list[dict[str, Any]]:

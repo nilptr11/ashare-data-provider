@@ -94,11 +94,11 @@ SKIPPED_DEFAULT_SCOPES = (
     },
     {
         "scope": "external_evidence",
-        "reason": "question-specific research layer; empty evidence is a research gap, not daily maintenance failure",
+        "reason": "question-specific; fetch authoritative sources during research when local evidence is insufficient",
     },
     {
         "scope": "knowledge",
-        "reason": "curated slow-variable layer; updated through proposal and accept flow",
+        "reason": "question-specific; organize industry-chain and company relations during research, then propose reusable knowledge",
     },
 )
 

@@ -7,7 +7,6 @@ from .features import FeatureBuilder, FeatureRegistry, FeatureStore, default_fea
 from .knowledge import KnowledgeStore
 from .marts.publisher import MartPublisher
 from .marts.reader import MartReader
-from .protocols import ProtocolRegistry
 from .raw_store import RawStore
 from .runs import RunRecorder
 from .schemas import DatasetCheck, DatasetSpec, FeatureSpec, MartPartition, MartPartitionMeta
@@ -29,7 +28,6 @@ __all__ = [
     "MartPartition",
     "MartPartitionMeta",
     "MartReader",
-    "ProtocolRegistry",
     "RawStore",
     "RunRecorder",
     "TushareConnector",

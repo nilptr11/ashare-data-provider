@@ -5,7 +5,7 @@
 ## 使用原则
 
 1. 本地 mart、feature、evidence、knowledge 已覆盖的问题，优先使用本地数据。
-2. 只有数据缺失、过期、覆盖不足或需要公司/产业证据时，才补外部来源。
+2. 数据缺失、过期、覆盖不足或需要公司/产业证据时，补外部来源。
 3. 外部来源不能覆盖本地已有的行情、公告、财务和资金事实；冲突时要标记冲突。
 4. 补证据时记录来源名称、URL 或接口、发布时间、抓取时间、适用范围和不确定性。
 5. 高频且结构稳定的来源，应沉淀为 connector 或 evidence adapter；一次性材料只作为 evidence。
@@ -45,6 +45,7 @@
 ## Fetch 后如何使用
 
 - 公司层事实：优先形成 evidence；若是稳定关系，再提交 knowledge proposal。
+- 产业链研究：先梳理上游、中游、下游、设备、材料、零部件、应用等节点，再把公司映射到节点。
 - 高频数值：先形成 evidence adapter candidate，稳定后再安装为 adapter。
 - 数据集型来源：优先变成 connector + dataset spec + mart。
 - 一次性网页或 PDF：只作为 evidence，并保留摘要、原始链接和抓取时间。

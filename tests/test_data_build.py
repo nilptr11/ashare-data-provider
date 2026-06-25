@@ -4,7 +4,7 @@ import json
 import pandas as pd
 import pytest
 
-from ashare_research.cli import _build_dataset, main
+from ashare_research.cli import _build_dataset, _enrich_member_frame, main
 from ashare_research.connectors import TushareConnector
 from ashare_research.connectors.tushare import configure_tushare_proxy
 from ashare_research.datasets.catalog import DatasetCatalog
@@ -209,6 +209,76 @@ def test_data_build_ignores_programmatic_fields_override(monkeypatch, tmp_path):
 
     assert payload["quality_status"] == "ok"
     assert calls == [DatasetCatalog.builtin().require("daily").default_fields]
+
+
+def test_enrich_member_frame_maps_con_code_to_stock_ts_code():
+    spec = DatasetCatalog.builtin().require("ths_member")
+    driver = pd.DataFrame([{"ts_code": "885800.TI", "name": "消费电子"}])
+    frame = pd.DataFrame([{"ts_code": "885800.TI", "con_code": "000016.SZ", "con_name": "深康佳A"}])
+
+    output = _enrich_member_frame(frame, spec, driver, "ts_code", "name")
+
+    assert output.iloc[0]["_driver_ts_code"] == "885800.TI"
+    assert output.iloc[0]["_driver_name"] == "消费电子"
+    assert output.iloc[0]["ts_code"] == "000016.SZ"
+    assert output.iloc[0]["name"] == "深康佳A"
+
+
+def test_cli_data_build_dc_member_publishes_real_stock_codes(monkeypatch, capsys, tmp_path):
+    catalog = DatasetCatalog.builtin()
+    MartPublisher(tmp_path, catalog).publish(
+        "dc_index",
+        pd.DataFrame([{"trade_date": "20260623", "ts_code": "BK1184.DC", "name": "人形机器人"}]),
+        partition={"trade_date": "20260623"},
+        source={"kind": "test"},
+    )
+    calls = []
+
+    class FakeConnector:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, api_name, params, fields=None):
+            calls.append({"api_name": api_name, "params": dict(params), "fields": tuple(fields or ())})
+            frame = pd.DataFrame(
+                [
+                    {
+                        "trade_date": params["trade_date"],
+                        "ts_code": params["ts_code"],
+                        "con_code": "002117.SZ",
+                        "name": "东港股份",
+                    }
+                ]
+            )
+            return TushareConnector(client=FakeTushareClient(frame)).fetch(api_name, params, fields)
+
+    monkeypatch.setattr("ashare_research.cli.TushareConnector", FakeConnector)
+
+    exit_code = main(
+        [
+            "--data-dir",
+            str(tmp_path),
+            "data",
+            "build",
+            "dc_member",
+            "--trade-date",
+            "20260623",
+            "--stock",
+            "BK1184.DC",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dataset"] == "dc_member"
+    assert payload["quality_status"] == "ok"
+    assert calls[0]["fields"] == catalog.require("dc_member").default_fields
+
+    frame = pd.read_parquet(tmp_path / "mart" / "dc_member" / "trade_date=20260623" / "part.parquet")
+    assert frame.iloc[0]["_driver_ts_code"] == "BK1184.DC"
+    assert frame.iloc[0]["_driver_name"] == "人形机器人"
+    assert frame.iloc[0]["ts_code"] == "002117.SZ"
+    assert frame.iloc[0]["name"] == "东港股份"
 
 
 def test_cli_data_update_is_build_alias(monkeypatch, capsys, tmp_path):

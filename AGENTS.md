@@ -13,9 +13,12 @@
 1. 读 `SKILL.md`。
 2. 读 `references/data-map.md`，确认本地已准备数据和适用边界。
 3. 需要定位具体 dataset / feature 时，读 `references/dataset-index.md`。
-4. 只有本地数据不足时，读 `references/source-registry.md` 找权威补证来源。
+4. 本地数据不足时，读 `references/source-registry.md` 找权威补证来源。
 5. 对事实、推断、假设和缺口拿不准时，读 `references/reasoning-policy.md`。
-6. 需要结构化输出时，使用 `industry_chain_selection.v1`；不要发明新的默认流程。
+6. 需要复盘时，用 `runs record` 留痕；不要发明新的默认流程。
+
+如果用户输入交易模式，先在当次研究里归一化主要矛盾、优先数据、证据要求和失效条件。
+本地 evidence 或 knowledge 不足时，按 `references/source-registry.md` 补权威来源，并把产业链上中下游节点与公司映射梳理清楚。
 
 ## 研究边界
 

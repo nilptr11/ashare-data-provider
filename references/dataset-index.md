@@ -56,7 +56,7 @@
 uv run ashare daily status --as-of YYYYMMDD --format json
 uv run ashare mart meta DATASET --trade-date YYYYMMDD
 uv run ashare feature meta FEATURE --as-of YYYYMMDD --window N
+uv run ashare feature read FEATURE --as-of YYYYMMDD --window N --columns COLS --sort SCORE --limit 30 --format json
 uv run ashare evidence search --industry INDUSTRY --format json
 uv run ashare knowledge search --entity ENTITY --format json
 ```
-
