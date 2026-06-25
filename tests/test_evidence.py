@@ -6,8 +6,8 @@ import pandas as pd
 from ashare_research.cli import main
 from ashare_research.connectors import ConnectorRegistry, ConnectorSpec
 from ashare_research.evidence import EvidenceStore
-from ashare_research.evidence.adapters import EvidenceAdapterRegistry, EvidenceAdapterRunner, EvidenceAdapterSpec
 from ashare_research.evidence.schemas import EvidenceError
+from ashare_research.evidence.sources import EvidenceSource, EvidenceSourceFetcher, EvidenceSourceRegistry
 from ashare_research.schemas import SourceResponse
 
 
@@ -31,7 +31,7 @@ def _official_record(**overrides):
         "query_time": "2026-06-24T15:26:50+08:00",
         "confidence": "high",
         "verification": "official_single_source",
-        "needs_adapter": True,
+        "needs_source": True,
         "raw_excerpt": "short excerpt",
         "supports": ["ai_infra_capex_trend"],
     }
@@ -74,7 +74,7 @@ def test_unknown_source_type_is_rejected(tmp_path):
         store.validate_evidence(payload)
 
 
-def test_evidence_adapter_candidates_for_repeated_numerical_series(tmp_path):
+def test_evidence_source_candidates_for_repeated_numerical_series(tmp_path):
     store = EvidenceStore(tmp_path)
     store.ingest_evidence(
         [
@@ -83,24 +83,24 @@ def test_evidence_adapter_candidates_for_repeated_numerical_series(tmp_path):
         ]
     )
 
-    candidates = store.adapter_candidates(min_records=2)
+    candidates = store.source_candidates(min_records=2)
 
     assert len(candidates) == 1
     assert candidates[0]["metric"] == "capital_expenditures"
     assert candidates[0]["records"] == 2
 
 
-def test_evidence_maturity_accepts_adapter_records(tmp_path):
+def test_evidence_maturity_accepts_fetched_records(tmp_path):
     store = EvidenceStore(tmp_path)
-    result = store.ingest_evidence(_official_record(maturity="adapter", adapter_id="adapter:capex"))
+    result = store.ingest_evidence(_official_record(maturity="fetched", source_id="source:capex"))
 
     record = store.read_records()[0]
     assert result.inserted == 1
-    assert record.maturity == "adapter"
-    assert record.adapter_id == "adapter:capex"
+    assert record.maturity == "fetched"
+    assert record.source_id == "source:capex"
 
 
-def test_cli_evidence_adapter_specs_propose_and_list(capsys, tmp_path):
+def test_cli_evidence_source_candidates_and_sources_list(capsys, tmp_path):
     evidence_file = tmp_path / "evidence.json"
     evidence_file.write_text(
         json.dumps(
@@ -120,52 +120,59 @@ def test_cli_evidence_adapter_specs_propose_and_list(capsys, tmp_path):
             "--data-dir",
             str(tmp_path),
             "evidence",
-            "adapter-specs",
-            "propose",
+            "source-candidates",
             "--min-records",
             "2",
+            "--format",
+            "json",
         ]
     )
     assert exit_code == 0
-    propose_payload = json.loads(capsys.readouterr().out)
-    assert propose_payload["proposed"] == 1
-    assert propose_payload["adapters"][0]["status"] == "proposed"
+    candidates = json.loads(capsys.readouterr().out)
+    assert len(candidates) == 1
+    assert candidates[0]["metric"] == "capital_expenditures"
 
-    exit_code = main(["--data-dir", str(tmp_path), "evidence", "adapter-specs", "list", "--format", "json"])
+    source_file = tmp_path / "source.json"
+    source_file.write_text(json.dumps(_source_payload(), ensure_ascii=False), encoding="utf-8")
+    exit_code = main(["--data-dir", str(tmp_path), "evidence", "sources", "add", str(source_file)])
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["source_id"] == "source:capex"
+    exit_code = main(["--data-dir", str(tmp_path), "evidence", "sources", "list", "--format", "json"])
     assert exit_code == 0
     list_payload = json.loads(capsys.readouterr().out)
     assert list_payload[0]["metric"] == "capital_expenditures"
+    assert "status" not in list_payload[0]
 
 
-def test_evidence_adapter_runner_ingests_adapter_records(tmp_path):
-    spec = _accepted_adapter_spec()
-    registry = EvidenceAdapterRegistry(tmp_path)
-    registry.write(EvidenceAdapterSpec.from_dict(spec))
-    runner = EvidenceAdapterRunner(
+def test_evidence_source_fetcher_ingests_fetched_records(tmp_path):
+    source = _source_payload()
+    registry = EvidenceSourceRegistry(tmp_path)
+    registry.add(EvidenceSource.from_dict(source))
+    fetcher = EvidenceSourceFetcher(
         evidence_store=EvidenceStore(tmp_path),
-        adapter_registry=registry,
+        source_registry=registry,
         connector_registry=_fake_connector_registry(),
     )
 
-    result = runner.run("adapter:capex")
+    result = fetcher.fetch("source:capex")
 
     assert result.inserted == 1
     record = EvidenceStore(tmp_path).read_records()[0]
-    assert record.maturity == "adapter"
-    assert record.adapter_id == "adapter:capex"
+    assert record.maturity == "fetched"
+    assert record.source_id == "source:capex"
     assert record.value == 34.9
 
 
-def test_cli_evidence_adapter_specs_install_and_run(monkeypatch, capsys, tmp_path):
-    spec_file = tmp_path / "adapter.json"
-    spec_file.write_text(json.dumps(_accepted_adapter_spec(), ensure_ascii=False), encoding="utf-8")
+def test_cli_evidence_sources_add_and_fetch(monkeypatch, capsys, tmp_path):
+    source_file = tmp_path / "source.json"
+    source_file.write_text(json.dumps(_source_payload(), ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(ConnectorRegistry, "builtin", classmethod(lambda cls: _fake_connector_registry()))
 
-    exit_code = main(["--data-dir", str(tmp_path), "evidence", "adapter-specs", "install", str(spec_file)])
+    exit_code = main(["--data-dir", str(tmp_path), "evidence", "sources", "add", str(source_file)])
     assert exit_code == 0
-    assert json.loads(capsys.readouterr().out)["adapter_id"] == "adapter:capex"
+    assert json.loads(capsys.readouterr().out)["source_id"] == "source:capex"
 
-    exit_code = main(["--data-dir", str(tmp_path), "evidence", "adapter-specs", "run", "adapter:capex"])
+    exit_code = main(["--data-dir", str(tmp_path), "evidence", "sources", "fetch", "source:capex"])
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["inserted"] == 1
@@ -230,10 +237,9 @@ def test_cli_evidence_ingest_search_export_and_collect(capsys, tmp_path):
     assert collect_payload["status"] == "needs_external_sources"
 
 
-def _accepted_adapter_spec():
+def _source_payload():
     return {
-        "adapter_id": "adapter:capex",
-        "status": "accepted",
+        "source_id": "source:capex",
         "source_type": "company_ir",
         "source_name": "Microsoft Investor Relations",
         "topic": "capex",
@@ -273,7 +279,7 @@ def _fake_connector_registry():
                         "unit": "USD billion",
                         "period": "FY2026 Q1",
                         "confidence": "high",
-                        "verification": "adapter_mapped",
+                        "verification": "source_mapped",
                     }
                 ]
             )

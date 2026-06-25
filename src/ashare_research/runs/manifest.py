@@ -26,7 +26,7 @@ class RunManifest:
     question: RunArtifact
     data_refs: RunArtifact | None = None
     evidence: RunArtifact | None = None
-    knowledge: RunArtifact | None = None
+    relations: RunArtifact | None = None
     model: dict[str, Any] = field(default_factory=dict)
     agent_reasoning: dict[str, Any] = field(default_factory=dict)
     quality_gates: dict[str, Any] = field(default_factory=dict)
@@ -41,7 +41,7 @@ class RunManifest:
             "question": self.question.to_dict(),
             "data_refs": self.data_refs.to_dict() if self.data_refs else None,
             "evidence": self.evidence.to_dict() if self.evidence else None,
-            "knowledge": self.knowledge.to_dict() if self.knowledge else None,
+            "relations": self.relations.to_dict() if self.relations else None,
             "model": dict(self.model),
             "agent_reasoning": dict(self.agent_reasoning),
             "quality_gates": dict(self.quality_gates),

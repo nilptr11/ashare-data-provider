@@ -97,8 +97,8 @@ SKIPPED_DEFAULT_SCOPES = (
         "reason": "question-specific; fetch authoritative sources during research when local evidence is insufficient",
     },
     {
-        "scope": "knowledge",
-        "reason": "question-specific; organize industry-chain and company relations during research, then propose reusable knowledge",
+        "scope": "relations",
+        "reason": "question-specific; organize industry-chain and company relations during research, then ingest reusable relations",
     },
 )
 

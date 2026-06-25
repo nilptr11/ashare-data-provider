@@ -85,7 +85,7 @@ def relation_errors(predicate: str, subject_type: str, object_type: str) -> list
 
 def taxonomy_payload() -> dict[str, object]:
     return {
-        "schema": "ashare.knowledge_taxonomy.v1",
+        "schema": "ashare.relation_taxonomy.v1",
         "entity_types": sorted(ENTITY_TYPES),
         "predicates": [
             {

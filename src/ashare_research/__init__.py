@@ -4,7 +4,7 @@ from .datasets.catalog import DatasetCatalog, default_dataset_specs
 from .connectors import AkshareConnector, ConnectorRegistry, TushareConnector
 from .evidence import EvidenceRecord, EvidenceStore
 from .features import FeatureBuilder, FeatureRegistry, FeatureStore, default_feature_specs
-from .knowledge import KnowledgeStore
+from .relations import RelationStore
 from .marts.publisher import MartPublisher
 from .marts.reader import MartReader
 from .raw_store import RawStore
@@ -23,7 +23,7 @@ __all__ = [
     "FeatureRegistry",
     "FeatureSpec",
     "FeatureStore",
-    "KnowledgeStore",
+    "RelationStore",
     "MartPublisher",
     "MartPartition",
     "MartPartitionMeta",

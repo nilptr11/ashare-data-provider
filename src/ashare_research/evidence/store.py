@@ -115,13 +115,13 @@ class EvidenceStore:
             "question": question,
             "as_of": as_of,
             "status": "needs_external_sources",
-            "message": "Fetch authoritative sources from the source registry, then ingest curated evidence or run accepted adapter specs.",
+            "message": "Fetch authoritative sources from the source registry, then ingest curated evidence or fetch from saved evidence sources.",
         }
 
-    def adapter_candidates(self, *, min_records: int = 3) -> list[dict[str, Any]]:
+    def source_candidates(self, *, min_records: int = 3) -> list[dict[str, Any]]:
         groups: dict[tuple[str, str, str, str, str, str], list[EvidenceRecord]] = {}
         for record in self.read_records():
-            if not _is_numerical_adapter_candidate(record):
+            if not _is_numerical_source_candidate(record):
                 continue
             key = (
                 record.source_type,
@@ -135,13 +135,13 @@ class EvidenceStore:
 
         candidates: list[dict[str, Any]] = []
         for key, records in groups.items():
-            if len(records) < min_records and not any(record.needs_adapter for record in records):
+            if len(records) < min_records and not any(record.needs_source for record in records):
                 continue
             source_type, source_name, topic, industry, metric, frequency = key
             periods = sorted({str(record.period) for record in records if record.period})
             candidates.append(
                 {
-                    "schema": "ashare.evidence_adapter_candidate.v1",
+                    "schema": "ashare.evidence_source_candidate.v1",
                     "source_type": source_type,
                     "source_name": source_name,
                     "topic": topic,
@@ -151,11 +151,10 @@ class EvidenceStore:
                     "records": len(records),
                     "periods": periods,
                     "evidence_ids": [record.evidence_id for record in records if record.evidence_id],
-                    "needs_adapter_count": sum(1 for record in records if record.needs_adapter),
-                    "status": "candidate",
+                    "needs_source_count": sum(1 for record in records if record.needs_source),
                 }
             )
-        candidates.sort(key=lambda row: (row["records"], row["needs_adapter_count"]), reverse=True)
+        candidates.sort(key=lambda row: (row["records"], row["needs_source_count"]), reverse=True)
         return candidates
 
     def read_records(self) -> list[EvidenceRecord]:
@@ -210,5 +209,5 @@ def _matches(record: EvidenceRecord, filters: dict[str, str | None]) -> bool:
     return True
 
 
-def _is_numerical_adapter_candidate(record: EvidenceRecord) -> bool:
+def _is_numerical_source_candidate(record: EvidenceRecord) -> bool:
     return bool(record.metric and record.frequency and record.value is not None)

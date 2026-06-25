@@ -2,7 +2,7 @@
 
 给 LLM / Codex 使用的 A 股研究数据底座。
 
-本项目不做 Agent runtime、API 服务、自动化交易系统或固定投研工作流。它只负责把本地 A 股研究数据、数据质量、外部证据、慢变量知识和研究留痕组织清楚，让 LLM 能基于明确边界自由推理。
+本项目不做 Agent runtime、API 服务、自动化交易系统或固定投研工作流。它只负责把本地 A 股研究数据、数据质量、外部证据、慢变量关系和研究留痕组织清楚，让 LLM 能基于明确边界自由推理。
 
 ## 核心取舍
 
@@ -11,14 +11,14 @@
 - 哪些是结构化事实；
 - 哪些只是筛查信号；
 - 哪些是外部证据；
-- 哪些是已接受的慢变量关系；
+- 哪些是带来源或推理依据、置信度的慢变量关系；
 - 缺数据时应该降级到什么程度。
 
 因此项目只保留三层：
 
 | 层 | 内容 | 作用 |
 | --- | --- | --- |
-| 数据事实层 | `data/mart`、`data/features`、`data/evidence`、`data/knowledge` | 提供事实、信号、证据和 accepted 慢变量 |
+| 数据事实层 | `data/mart`、`data/features`、`data/evidence`、`data/relations` | 提供事实、信号、证据和 traceable 慢变量关系 |
 | 研究纪律层 | `SKILL.md`、`references/data-map.md`、`references/source-registry.md`、`references/reasoning-policy.md`、`references/dataset-index.md` | 告诉 LLM 怎么读数据、怎么降级、哪些结论不能越界 |
 | 留痕层 | `runs`、`reports` | 记录一次研究用了什么材料和质量检查结果 |
 
@@ -35,9 +35,10 @@
      - mart：结构化事实
      - feature：筛查、排序、交叉验证信号
      - evidence：外部产业证据
-     - knowledge：accepted 慢变量关系
+     - relations：带来源或推理依据、置信度的慢变量关系
   -> 按 reasoning-policy 区分事实、推断、假设和缺口
   -> 输出研究结论
+  -> 对可复用产业链关系执行 relations ingest
   -> 可选：用 runs 做留痕和质量检查
 ```
 
@@ -49,7 +50,7 @@
 用户问题或假设
   -> 读 SKILL.md 和 references/data-map.md
   -> 检查数据日期、覆盖范围和质量
-  -> 读取最小必要 mart / feature / evidence / knowledge
+  -> 读取最小必要 mart / feature / evidence / relations
   -> 本地数据不足时按 references/source-registry.md 补权威证据
   -> 输出事实、推断、假设、缺口和降级影响
   -> 需要复盘时 runs record 留痕
@@ -62,7 +63,7 @@
 - `mart`：行情、指数、行业、公告、财务、资金等结构化事实源。
 - `feature`：市场强弱、行业/概念强弱、情绪、龙头验证、高弹性候选等可复现筛查信号。
 - `evidence`：项目内 mart 覆盖不了的产业价格、订单、产能、capex、政策、招投标等外部证据。
-- `knowledge`：公司、产品、客户、产业链节点和关系等 accepted 慢变量。
+- `relations`：公司、产品、客户、产业链节点和关系等慢变量；Codex 分析后直接写入，每条记录必须带来源或推理依据、置信度和有效期。
 - `runs` / `reports`：研究留痕和展示，不回流为事实源。
 
 Feature 分数、概念成分、热榜、人气或涨停池不能单独证明公司业务暴露度。
@@ -81,7 +82,7 @@ uv sync --group dev
 uv run ashare daily status --as-of YYYYMMDD --format json
 ```
 
-`daily status` 检查默认日常基础库和 feature。财务重表、筹码、外部 evidence、knowledge 是按问题维护的增强层，不进入默认日常阻断项。
+`daily status` 检查默认日常基础库和 feature。财务重表、筹码、外部 evidence、relations 是按问题维护的增强层，不进入默认日常阻断项。
 
 列出和检查数据：
 
@@ -99,18 +100,20 @@ uv run ashare mart read daily --trade-date YYYYMMDD --limit 20 --format json
 uv run ashare feature read concept_strength --as-of YYYYMMDD --window 20 --limit 50 --format json
 uv run ashare feature read concept_strength --as-of YYYYMMDD --window 20 --columns ts_code,name,strength_score --sort strength_score --limit 30 --format json
 uv run ashare evidence search --industry INDUSTRY --format json
-uv run ashare knowledge search --entity ENTITY --format json
+uv run ashare relations search --entity ENTITY --format json
 ```
 
-维护证据和知识：
+维护证据和关系：
 
 ```bash
 uv run ashare evidence ingest evidence.json
-uv run ashare evidence adapter-candidates --min-records 3
-uv run ashare knowledge taxonomy --format json
-uv run ashare knowledge propose knowledge.json --reason "source checked"
-uv run ashare knowledge accept PROPOSAL_ID
+uv run ashare evidence source-candidates --min-records 3
+uv run ashare evidence sources fetch SOURCE_ID
+uv run ashare relations taxonomy --format json
+uv run ashare relations ingest relations.json
 ```
+
+`relations ingest` 是 Codex 分析后沉淀产业链节点、产品暴露、上下游、客户或供应关系的默认落点。它不是状态队列；可信度由来源或推理依据、置信度、有效期和后续复核来控制。
 
 记录研究留痕：
 

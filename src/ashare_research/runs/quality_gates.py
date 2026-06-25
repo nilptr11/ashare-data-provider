@@ -2,7 +2,32 @@ from __future__ import annotations
 
 from typing import Any
 
-STRONG_EXPOSURE_SOURCE_KINDS = {"mart", "evidence", "knowledge"}
+STRONG_EXPOSURE_SOURCE_KINDS = {"mart", "evidence", "relations"}
+AUDIT_REQUIRED_SOURCE_KINDS = {
+    "evidence",
+    "company_filing",
+    "company_ir",
+    "exchange",
+    "regulator",
+    "gov_policy",
+    "official",
+    "official_platform",
+    "association",
+    "industry_association",
+    "tender_platform",
+    "price_index",
+    "vendor",
+    "media",
+    "research_report",
+    "web",
+    "other",
+}
+AUDIT_FIELD_ALIASES = {
+    "source_name": ("source_name", "source_title", "title"),
+    "source_url": ("source_url", "url", "source_api", "interface"),
+    "published_at": ("published_at", "publish_date", "published_date", "date"),
+    "query_time": ("query_time", "fetched_at", "accessed_at"),
+}
 WEAK_VERIFICATIONS = {"unverified", "stale"}
 HIGH_PRIORITY_VALUES = {"core", "high", "primary", "重点", "优先"}
 
@@ -14,7 +39,7 @@ def evaluate_quality_gates(
     has_validated_output: bool,
     validated_output: dict[str, Any] | None = None,
     evidence_artifact: dict[str, Any] | None = None,
-    knowledge_artifact: dict[str, Any] | None = None,
+    relations_artifact: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output = validated_output if has_validated_output else None
     gates = {
@@ -22,7 +47,8 @@ def evaluate_quality_gates(
         "freshness_gate": _freshness_gate(data_refs, as_of),
         "data_refs_gate": _data_refs_gate(data_refs),
         "gap_gate": _gap_gate(data_refs, output),
-        "source_gate": _source_gate(evidence_artifact, knowledge_artifact, output),
+        "source_gate": _source_gate(evidence_artifact, relations_artifact, output),
+        "source_audit_gate": _source_audit_gate(output),
         "confidence_gate": _confidence_gate(output),
     }
     status = "passed"
@@ -97,14 +123,14 @@ def _data_refs_gate(data_refs: dict[str, Any]) -> dict[str, Any]:
 
 def _source_gate(
     evidence_artifact: dict[str, Any] | None,
-    knowledge_artifact: dict[str, Any] | None,
+    relations_artifact: dict[str, Any] | None,
     output: dict[str, Any] | None,
 ) -> dict[str, Any]:
     missing = []
     if not evidence_artifact:
         missing.append("evidence")
-    if not knowledge_artifact:
-        missing.append("knowledge")
+    if not relations_artifact:
+        missing.append("relations")
     if missing:
         return _gate("warning", f"source artifacts missing: {missing}")
 
@@ -112,9 +138,29 @@ def _source_gate(
     if unsupported_exposure:
         return _gate(
             "blocked",
-            "company exposure claims require mart, evidence, or accepted knowledge support",
+            "company exposure claims require mart, evidence, or traceable relations support",
             {"items": unsupported_exposure},
         )
+    return _gate("passed", "")
+
+
+def _source_audit_gate(output: dict[str, Any] | None) -> dict[str, Any]:
+    if output is None:
+        return _gate("not_evaluated", "validated output not provided")
+
+    missing = []
+    for ref in _external_source_refs(output):
+        missing_fields = _missing_audit_fields(ref)
+        if missing_fields:
+            missing.append(
+                {
+                    "source": _source_ref_label(ref),
+                    "source_kind": ref.get("source_kind") or ref.get("source_type"),
+                    "missing_fields": missing_fields,
+                }
+            )
+    if missing:
+        return _gate("blocked", "external evidence references require source name, URL, publish date, and fetch time", {"items": missing})
     return _gate("passed", "")
 
 
@@ -197,11 +243,70 @@ def _has_strong_exposure(mapping: dict[str, Any]) -> bool:
     refs = _list_of_dicts(mapping.get("exposure_evidence"))
     if not refs:
         return False
-    return any(str(ref.get("source_kind") or "") in STRONG_EXPOSURE_SOURCE_KINDS for ref in refs)
+    return any(_is_strong_exposure_ref(ref) for ref in refs)
+
+
+def _is_strong_exposure_ref(ref: dict[str, Any]) -> bool:
+    source_kind = str(ref.get("source_kind") or "")
+    if source_kind not in STRONG_EXPOSURE_SOURCE_KINDS:
+        return False
+    if not _has_source_reference(ref):
+        return False
+    if _requires_audit(ref) and _missing_audit_fields(ref):
+        return False
+    return True
 
 
 def _source_kinds(value: Any) -> list[str]:
     return sorted({str(item.get("source_kind") or "") for item in _list_of_dicts(value) if item.get("source_kind")})
+
+
+def _has_source_reference(ref: dict[str, Any]) -> bool:
+    source_kind = str(ref.get("source_kind") or "")
+    if source_kind == "relations":
+        keys = ("source_id", "relation_id", "raw_ref")
+    elif source_kind == "evidence":
+        keys = ("source_id", "evidence_id", "raw_ref", "url", "source_url")
+    else:
+        keys = ("source_id", "raw_ref", "url", "source_url")
+    return any(str(ref.get(key) or "").strip() for key in keys)
+
+
+def _external_source_refs(output: dict[str, Any]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for item in _walk_dicts(output):
+        if _requires_audit(item):
+            refs.append(item)
+    return refs
+
+
+def _walk_dicts(value: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        found.append(value)
+        for child in value.values():
+            found.extend(_walk_dicts(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(_walk_dicts(child))
+    return found
+
+
+def _requires_audit(ref: dict[str, Any]) -> bool:
+    source_kind = str(ref.get("source_kind") or ref.get("source_type") or "").lower()
+    return source_kind in AUDIT_REQUIRED_SOURCE_KINDS
+
+
+def _missing_audit_fields(ref: dict[str, Any]) -> list[str]:
+    missing = []
+    for field_name, aliases in AUDIT_FIELD_ALIASES.items():
+        if not any(str(ref.get(alias) or "").strip() for alias in aliases):
+            missing.append(field_name)
+    return missing
+
+
+def _source_ref_label(ref: dict[str, Any]) -> str:
+    return str(ref.get("source_id") or ref.get("evidence_id") or ref.get("claim") or ref.get("title") or "<unknown>")
 
 
 def _items(output: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:

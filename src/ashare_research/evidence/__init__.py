@@ -1,15 +1,15 @@
-from .adapters import EvidenceAdapterRegistry, EvidenceAdapterSpec
 from .quality import validate_evidence
 from .scoring import score_confidence
 from .schemas import EvidenceError, EvidenceRecord
+from .sources import EvidenceSource, EvidenceSourceRegistry
 from .store import EvidenceIngestResult, EvidenceStore
 
 __all__ = [
-    "EvidenceAdapterRegistry",
-    "EvidenceAdapterSpec",
     "EvidenceError",
     "EvidenceIngestResult",
     "EvidenceRecord",
+    "EvidenceSource",
+    "EvidenceSourceRegistry",
     "EvidenceStore",
     "score_confidence",
     "validate_evidence",

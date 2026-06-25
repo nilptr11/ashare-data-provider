@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from .schemas import KnowledgeRecord
+from .schemas import RelationRecord
 
 
-def build_edge_list(records: list[KnowledgeRecord]) -> list[dict[str, str]]:
+def build_edge_list(records: list[RelationRecord]) -> list[dict[str, str]]:
     return [
         {
             "subject_type": record.subject.type,
@@ -20,9 +20,9 @@ def build_edge_list(records: list[KnowledgeRecord]) -> list[dict[str, str]]:
     ]
 
 
-def outgoing(records: list[KnowledgeRecord], entity_id: str) -> list[dict[str, str]]:
+def outgoing(records: list[RelationRecord], entity_id: str) -> list[dict[str, str]]:
     return [edge for edge in build_edge_list(records) if edge["subject_id"] == entity_id]
 
 
-def incoming(records: list[KnowledgeRecord], entity_id: str) -> list[dict[str, str]]:
+def incoming(records: list[RelationRecord], entity_id: str) -> list[dict[str, str]]:
     return [edge for edge in build_edge_list(records) if edge["object_id"] == entity_id]

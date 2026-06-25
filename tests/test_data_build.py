@@ -36,13 +36,37 @@ def test_tushare_connector_fetches_dataframe_with_metadata():
     assert client.calls[0]["fields"] == "ts_code,close"
 
 
-def test_configure_tushare_proxy_updates_sdk_endpoint():
+def test_tushare_connector_passes_timeout_to_sdk(monkeypatch):
+    from tushare.pro import client as ts_client
+
+    calls = []
+    original_url = ts_client.DataApi._DataApi__http_url
+
+    def fake_pro_api(token, timeout=30):
+        calls.append({"token": token, "timeout": timeout})
+        return FakeTushareClient(pd.DataFrame())
+
+    monkeypatch.delenv("TUSHARE_PROXY_URL", raising=False)
+    monkeypatch.setattr("tushare.pro_api", fake_pro_api)
+
+    try:
+        client = TushareConnector(token="token-1", timeout=7)._build_client()
+    finally:
+        ts_client.DataApi._DataApi__http_url = original_url
+
+    assert isinstance(client, FakeTushareClient)
+    assert calls == [{"token": "token-1", "timeout": 7}]
+
+
+def test_configure_tushare_proxy_updates_sdk_endpoint(monkeypatch):
+    import ashare_research.connectors.tushare as tushare_module
     from tushare.pro import client as ts_client
 
     original_url = ts_client.DataApi._DataApi__http_url
     proxy_url = "https://proxy.example.com/tushare"
 
     try:
+        monkeypatch.setattr(tushare_module, "_TUSHARE_DEFAULT_HTTP_URL", None)
         configure_tushare_proxy(proxy_url)
 
         assert ts_client.DataApi._DataApi__http_url == proxy_url
@@ -106,8 +130,11 @@ def test_cli_data_build_uses_connector_raw_store_and_publisher(monkeypatch, caps
         ]
     )
 
+    created_kwargs = []
+
     class FakeConnector:
         def __init__(self, **kwargs):
+            created_kwargs.append(kwargs)
             self.kwargs = kwargs
 
         def fetch(self, api_name, params, fields=None):
@@ -124,6 +151,8 @@ def test_cli_data_build_uses_connector_raw_store_and_publisher(monkeypatch, caps
             "daily",
             "--trade-date",
             "20260623",
+            "--timeout",
+            "7",
         ]
     )
 
@@ -133,6 +162,7 @@ def test_cli_data_build_uses_connector_raw_store_and_publisher(monkeypatch, caps
     assert payload["rows"] == 1
     assert payload["quality_status"] == "ok"
     assert payload["quality"]["status"] == "ok"
+    assert created_kwargs[0]["timeout"] == 7
     assert (tmp_path / "mart" / "daily" / "trade_date=20260623" / "part.parquet").exists()
     assert (tmp_path / "raw" / "tushare" / "daily").exists()
 
@@ -201,6 +231,7 @@ def test_data_build_ignores_programmatic_fields_override(monkeypatch, tmp_path):
         fields="ts_code,trade_date",
         token=None,
         proxy_url=None,
+        timeout=30,
         env_file=None,
         refresh=False,
     )

@@ -22,9 +22,9 @@ from .daily import (
 )
 from .datasets.catalog import DatasetCatalog
 from .evidence import EvidenceStore
-from .evidence.adapters import EvidenceAdapterRegistry, EvidenceAdapterRunner, EvidenceAdapterSpec
+from .evidence.sources import EvidenceSource, EvidenceSourceFetcher, EvidenceSourceRegistry
 from .features import FeatureBuilder, FeatureRegistry, FeatureStore, ScoringProfile
-from .knowledge import KnowledgeStore, proposal_rows, taxonomy_payload
+from .relations import RelationStore, taxonomy_payload
 from .marts.publisher import MartPublisher
 from .marts.reader import MartReader
 from .output import emit
@@ -76,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     connectors_fetch.add_argument("--body-json", help="HTTP POST body JSON；未传时用 -p 参数作为 body")
     connectors_fetch.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN 或 .env")
     connectors_fetch.add_argument("--proxy-url", help="Tushare proxy url；默认读取 TUSHARE_PROXY_URL 或 .env")
+    connectors_fetch.add_argument("--timeout", type=int, default=30, help="source 请求超时秒数")
     connectors_fetch.add_argument("--env-file", default=".env", help="环境变量文件；不存在时忽略")
     connectors_fetch.add_argument("--store-raw", action=argparse.BooleanOptionalAction, default=True)
     connectors_fetch.add_argument("--limit", type=int, default=20)
@@ -179,66 +180,48 @@ def build_parser() -> argparse.ArgumentParser:
     evidence_collect.add_argument("--as-of")
     evidence_collect.add_argument("--format", choices=("table", "json"), default="json")
 
-    evidence_adapters = evidence_subparsers.add_parser("adapter-candidates", help="列出可晋升 adapter 的高频数值证据")
-    evidence_adapters.add_argument("--min-records", type=int, default=3)
-    evidence_adapters.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
+    evidence_source_candidates = evidence_subparsers.add_parser("source-candidates", help="列出适合沉淀为可复用来源的高频数值证据")
+    evidence_source_candidates.add_argument("--min-records", type=int, default=3)
+    evidence_source_candidates.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
 
-    evidence_adapter_specs = evidence_subparsers.add_parser("adapter-specs", help="管理 evidence adapter proposal/spec")
-    evidence_adapter_specs_subparsers = evidence_adapter_specs.add_subparsers(dest="adapter_specs_command", required=True)
-    evidence_adapter_specs_list = evidence_adapter_specs_subparsers.add_parser("list", help="列出 adapter specs")
-    evidence_adapter_specs_list.add_argument("--status", choices=("proposed", "accepted", "retired"))
-    evidence_adapter_specs_list.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
-    evidence_adapter_specs_propose = evidence_adapter_specs_subparsers.add_parser("propose", help="从 adapter candidates 生成 proposed specs")
-    evidence_adapter_specs_propose.add_argument("--min-records", type=int, default=3)
-    evidence_adapter_specs_propose.add_argument("--overwrite", action="store_true")
-    evidence_adapter_specs_propose.add_argument("--format", choices=("table", "json"), default="json")
-    evidence_adapter_specs_install = evidence_adapter_specs_subparsers.add_parser("install", help="安装 adapter spec JSON")
-    evidence_adapter_specs_install.add_argument("input")
-    evidence_adapter_specs_install.add_argument("--overwrite", action="store_true")
-    evidence_adapter_specs_install.add_argument("--format", choices=("table", "json"), default="json")
-    evidence_adapter_specs_run = evidence_adapter_specs_subparsers.add_parser("run", help="运行 accepted adapter spec 并入库 evidence")
-    evidence_adapter_specs_run.add_argument("adapter_id")
-    evidence_adapter_specs_run.add_argument("-p", "--param", action="append", default=[], help="运行参数，key=value 或 key:=JSON")
-    evidence_adapter_specs_run.add_argument("--format", choices=("table", "json"), default="json")
+    evidence_sources = evidence_subparsers.add_parser("sources", help="管理可复用 evidence 来源")
+    evidence_sources_subparsers = evidence_sources.add_subparsers(dest="sources_command", required=True)
+    evidence_sources_list = evidence_sources_subparsers.add_parser("list", help="列出已保存来源")
+    evidence_sources_list.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
+    evidence_sources_add = evidence_sources_subparsers.add_parser("add", help="保存来源 JSON")
+    evidence_sources_add.add_argument("input")
+    evidence_sources_add.add_argument("--overwrite", action="store_true")
+    evidence_sources_add.add_argument("--format", choices=("table", "json"), default="json")
+    evidence_sources_fetch = evidence_sources_subparsers.add_parser("fetch", help="按已保存来源拉取并入库 evidence")
+    evidence_sources_fetch.add_argument("source_id")
+    evidence_sources_fetch.add_argument("-p", "--param", action="append", default=[], help="拉取参数，key=value 或 key:=JSON")
+    evidence_sources_fetch.add_argument("--format", choices=("table", "json"), default="json")
 
-    knowledge_parser = subparsers.add_parser("knowledge", help="慢变量知识库 proposal、审核和检索")
-    knowledge_subparsers = knowledge_parser.add_subparsers(dest="knowledge_command", required=True)
+    relations_parser = subparsers.add_parser("relations", help="慢变量关系库写入和检索")
+    relations_subparsers = relations_parser.add_subparsers(dest="relations_command", required=True)
 
-    knowledge_propose = knowledge_subparsers.add_parser("propose", help="写入 proposed knowledge JSON 或 JSONL")
-    knowledge_propose.add_argument("input")
-    knowledge_propose.add_argument("--reason")
-    knowledge_propose.add_argument("--proposed-by", default="llm_agent")
-    knowledge_propose.add_argument("--format", choices=("table", "json"), default="json")
+    relations_ingest = relations_subparsers.add_parser("ingest", help="写入 traceable relations JSON 或 JSONL")
+    relations_ingest.add_argument("input")
+    relations_ingest.add_argument("--format", choices=("table", "json"), default="json")
 
-    knowledge_accept = knowledge_subparsers.add_parser("accept", help="接受一个 knowledge proposal 并写入 current")
-    knowledge_accept.add_argument("proposal_id")
-    knowledge_accept.add_argument("--accepted-by", default="human")
-    knowledge_accept.add_argument("--reason")
-    knowledge_accept.add_argument("--format", choices=("table", "json"), default="json")
+    relations_list = relations_subparsers.add_parser("list", help="列出 relation records")
+    relations_list.add_argument("--limit", type=int, default=20)
+    relations_list.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
 
-    knowledge_proposals = knowledge_subparsers.add_parser("proposals", help="列出 knowledge proposals")
-    knowledge_proposals.add_argument("--status", choices=("proposed", "accepted", "rejected"))
-    knowledge_proposals.add_argument("--limit", type=int, default=20)
-    knowledge_proposals.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
+    relations_search = relations_subparsers.add_parser("search", help="检索 relation records")
+    relations_search.add_argument("--entity")
+    relations_search.add_argument("--predicate")
+    relations_search.add_argument("--source-type")
+    relations_search.add_argument("--evidence-id")
+    relations_search.add_argument("--limit", type=int, default=20)
+    relations_search.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
 
-    knowledge_list = knowledge_subparsers.add_parser("list", help="列出 current knowledge")
-    knowledge_list.add_argument("--limit", type=int, default=20)
-    knowledge_list.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
+    relations_snapshot = relations_subparsers.add_parser("snapshot", help="生成 relations snapshot")
+    relations_snapshot.add_argument("--output")
+    relations_snapshot.add_argument("--format", choices=("table", "json"), default="json")
 
-    knowledge_search = knowledge_subparsers.add_parser("search", help="检索 current knowledge")
-    knowledge_search.add_argument("--entity")
-    knowledge_search.add_argument("--predicate")
-    knowledge_search.add_argument("--source-type")
-    knowledge_search.add_argument("--evidence-id")
-    knowledge_search.add_argument("--limit", type=int, default=20)
-    knowledge_search.add_argument("--format", choices=OUTPUT_FORMATS, default="table")
-
-    knowledge_snapshot = knowledge_subparsers.add_parser("snapshot", help="生成 current knowledge snapshot")
-    knowledge_snapshot.add_argument("--output")
-    knowledge_snapshot.add_argument("--format", choices=("table", "json"), default="json")
-
-    knowledge_taxonomy = knowledge_subparsers.add_parser("taxonomy", help="显示 knowledge 实体类型和关系白名单")
-    knowledge_taxonomy.add_argument("--format", choices=("json", "table"), default="json")
+    relations_taxonomy = relations_subparsers.add_parser("taxonomy", help="显示 relations 实体类型和关系白名单")
+    relations_taxonomy.add_argument("--format", choices=("json", "table"), default="json")
 
     runs_parser = subparsers.add_parser("runs", help="记录和回放分析 run 留痕")
     runs_subparsers = runs_parser.add_subparsers(dest="runs_command", required=True)
@@ -250,7 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
     runs_record.add_argument("--mart-ref", action="append", default=[], help="本次分析引用的 mart 分区，格式 DATASET:key=value[,key=value]")
     runs_record.add_argument("--feature-ref", action="append", default=[], help="本次分析引用的 feature 分区，格式 FEATURE:as_of=YYYYMMDD,window=N")
     runs_record.add_argument("--evidence")
-    runs_record.add_argument("--knowledge")
+    runs_record.add_argument("--relations")
     runs_record.add_argument("--model-output-file")
     runs_record.add_argument("--validated-output")
     runs_record.add_argument("--agent-reasoning")
@@ -288,8 +271,8 @@ def main(argv: list[str] | None = None) -> int:
             return _handle_feature(args, reader)
         if args.command == "evidence":
             return _handle_evidence(args, reader)
-        if args.command == "knowledge":
-            return _handle_knowledge(args, reader)
+        if args.command == "relations":
+            return _handle_relations(args, reader)
         if args.command == "runs":
             return _handle_runs(args, reader)
     except AShareResearchError as error:
@@ -310,6 +293,7 @@ def _add_daily_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--continue-on-error", action=argparse.BooleanOptionalAction, default=True, help="记录失败并继续后续任务")
     parser.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN 或 .env")
     parser.add_argument("--proxy-url", help="Tushare proxy url；默认读取 TUSHARE_PROXY_URL 或 .env")
+    parser.add_argument("--timeout", type=int, default=30, help="source 请求超时秒数")
     parser.add_argument("--env-file", default=".env", help="环境变量文件；不存在时忽略")
     parser.add_argument("--format", choices=("table", "json"), default="json")
 
@@ -469,7 +453,7 @@ def _daily_dataset_args(args: argparse.Namespace, task, *, as_of: str, event_day
         "max_stocks": None,
         "category": "全部",
         "keyword": None,
-        "timeout": 30,
+        "timeout": args.timeout,
         "scan_periods": 5,
         "param": [],
         "token": args.token,
@@ -545,7 +529,7 @@ def _fetch_connector_response(args: argparse.Namespace, registry: ConnectorRegis
         params["body"] = json.loads(args.body_json)
     fields = _fields(args.fields, ())
     if args.source == "tushare":
-        connector = registry.create(args.source, token=args.token, proxy_url=args.proxy_url)
+        connector = registry.create(args.source, token=args.token, proxy_url=args.proxy_url, timeout=args.timeout)
     else:
         connector = registry.create(args.source)
     return connector.fetch(args.api_name, params=params, fields=fields)
@@ -574,7 +558,7 @@ def _build_single_partition_dataset(args: argparse.Namespace, reader: MartReader
     if not partition:
         raise AShareResearchError(f"{args.dataset}: partition is required")
     fields = list(spec.default_fields)
-    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
+    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url, timeout=args.timeout)
     responses, raw_paths, frame = _fetch_dataset_frame(connector, reader.data_dir, spec, args, partition, fields=fields)
     return _publish_dataset_frame(reader, spec, partition, frame, responses=responses, raw_paths=raw_paths, refresh=args.refresh)
 
@@ -819,7 +803,7 @@ def _build_member_dataset(args: argparse.Namespace, reader: MartReader, spec: Da
     if code_column is None:
         raise AShareResearchError(f"{spec.driver_dataset}: missing driver code column")
     name_column = _first_existing_column(driver, spec.driver_name_columns)
-    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
+    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url, timeout=args.timeout)
     fields = list(spec.default_fields)
     base_params: dict[str, object] = {}
     if spec.maintenance_kind == "member_by_index_trade_date" and spec.date_param:
@@ -944,7 +928,7 @@ def _build_stock_pool_daily_dataset(args: argparse.Namespace, reader: MartReader
         raise AShareResearchError(f"{spec.name}: --trade-date or --end-date is required")
     start_date = args.start_date or trade_date
     end_date = args.end_date or trade_date
-    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
+    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url, timeout=args.timeout)
     fields = list(spec.default_fields)
     codes = _stock_pool_codes(args, reader, connector, end_date)
     raw_store = RawStore(reader.data_dir)
@@ -998,7 +982,7 @@ def _build_stock_pool_financial_dataset(args: argparse.Namespace, reader: MartRe
     if not end_date:
         raise AShareResearchError(f"{spec.name}: --period or --end-date is required")
     start_date = args.start_date or end_date
-    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
+    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url, timeout=args.timeout)
     fields = list(spec.default_fields)
     codes = _stock_pool_codes(args, reader, connector, end_date)
     raw_store = RawStore(reader.data_dir)
@@ -1052,7 +1036,7 @@ def _build_disclosure_date_dataset(args: argparse.Namespace, reader: MartReader,
         raise AShareResearchError(f"{spec.name}: --period is required")
     partition = {"period": period}
     fields = list(spec.default_fields)
-    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
+    connector = TushareConnector(token=args.token, proxy_url=args.proxy_url, timeout=args.timeout)
     responses, raw_paths, frame = _fetch_dataset_frame(connector, reader.data_dir, spec, args, partition, fields=fields)
     return _publish_dataset_frame(reader, spec, partition, frame, responses=responses, raw_paths=raw_paths, refresh=args.refresh)
 
@@ -1185,7 +1169,7 @@ def _add_data_build_parser(subparsers: argparse._SubParsersAction[argparse.Argum
     data_build.add_argument("--max-stocks", type=int, help="限制股票池数量；用于 smoke 或分批更新")
     data_build.add_argument("--category", default="全部", help="公告分类，默认全部")
     data_build.add_argument("--keyword", help="公告/业绩预告关键词过滤")
-    data_build.add_argument("--timeout", type=int, default=30, help="事件源请求超时秒数")
+    data_build.add_argument("--timeout", type=int, default=30, help="source 请求超时秒数")
     data_build.add_argument("--scan-periods", type=int, default=5, help="业绩预告自动扫描最近报告期数量")
     data_build.add_argument("-p", "--param", action="append", default=[], help="额外 source 参数，key=value 或 key:=JSON")
     data_build.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN 或 .env")
@@ -1301,66 +1285,44 @@ def _handle_evidence(args: argparse.Namespace, reader: MartReader) -> int:
     if args.evidence_command == "collect":
         emit(store.collect_evidence(args.question, as_of=args.as_of), fmt=args.format)
         return 0
-    if args.evidence_command == "adapter-candidates":
-        emit(store.adapter_candidates(min_records=args.min_records), fmt=args.format)
+    if args.evidence_command == "source-candidates":
+        emit(store.source_candidates(min_records=args.min_records), fmt=args.format)
         return 0
-    if args.evidence_command == "adapter-specs":
-        registry = EvidenceAdapterRegistry(reader.data_dir)
-        if args.adapter_specs_command == "list":
-            rows = [spec.to_dict() for spec in registry.list(status=args.status)]
+    if args.evidence_command == "sources":
+        registry = EvidenceSourceRegistry(reader.data_dir)
+        if args.sources_command == "list":
+            rows = [source.to_dict() for source in registry.list()]
             emit(rows, fmt=args.format)
             return 0
-        if args.adapter_specs_command == "propose":
-            candidates = store.adapter_candidates(min_records=args.min_records)
-            rows = registry.propose_from_candidates(candidates, overwrite=args.overwrite)
-            emit(
-                {
-                    "schema": "ashare.evidence_adapter_propose_result.v1",
-                    "proposed": len(rows),
-                    "adapters": rows,
-                },
-                fmt=args.format,
-            )
+        if args.sources_command == "add":
+            source = EvidenceSource.from_dict(_load_json_file(Path(args.input)))
+            path = registry.add(source, overwrite=args.overwrite)
+            emit(source.to_dict() | {"path": str(path)}, fmt=args.format)
             return 0
-        if args.adapter_specs_command == "install":
-            spec = EvidenceAdapterSpec.from_dict(_load_json_file(Path(args.input)))
-            path = registry.write(spec, overwrite=args.overwrite)
-            emit(spec.to_dict() | {"path": str(path)}, fmt=args.format)
-            return 0
-        if args.adapter_specs_command == "run":
-            result = EvidenceAdapterRunner(
+        if args.sources_command == "fetch":
+            result = EvidenceSourceFetcher(
                 evidence_store=store,
-                adapter_registry=registry,
-            ).run(args.adapter_id, params=_parse_params(args.param))
+                source_registry=registry,
+            ).fetch(args.source_id, params=_parse_params(args.param))
             emit(result.to_dict(), fmt=args.format)
             return 0
     raise AShareResearchError(f"unknown evidence command: {args.evidence_command}")
 
 
-def _handle_knowledge(args: argparse.Namespace, reader: MartReader) -> int:
-    store = KnowledgeStore(reader.data_dir)
-    if args.knowledge_command == "propose":
-        payload = _load_structured_payload(Path(args.input), label="knowledge")
-        result = store.propose_records(payload, reason=args.reason, proposed_by=args.proposed_by)
+def _handle_relations(args: argparse.Namespace, reader: MartReader) -> int:
+    store = RelationStore(reader.data_dir)
+    if args.relations_command == "ingest":
+        payload = _load_structured_payload(Path(args.input), label="relations")
+        result = store.ingest_records(payload)
         emit(result.to_dict(), fmt=args.format)
         return 0
-    if args.knowledge_command == "accept":
-        result = store.accept(args.proposal_id, accepted_by=args.accepted_by, reason=args.reason)
-        emit(result.to_dict(), fmt=args.format)
-        return 0
-    if args.knowledge_command == "proposals":
-        rows = proposal_rows(store.read_proposals(status=args.status))
-        if args.limit and args.limit > 0:
-            rows = rows[: args.limit]
-        emit(rows, fmt=args.format)
-        return 0
-    if args.knowledge_command == "list":
-        records = [record.to_dict() for record in store.read_current_records()]
+    if args.relations_command == "list":
+        records = [record.to_dict() for record in store.read_records()]
         if args.limit and args.limit > 0:
             records = records[: args.limit]
         emit(records, fmt=args.format)
         return 0
-    if args.knowledge_command == "search":
+    if args.relations_command == "search":
         records = [
             record.to_dict()
             for record in store.search(
@@ -1373,13 +1335,13 @@ def _handle_knowledge(args: argparse.Namespace, reader: MartReader) -> int:
         ]
         emit(records, fmt=args.format)
         return 0
-    if args.knowledge_command == "snapshot":
+    if args.relations_command == "snapshot":
         emit(store.snapshot(output_path=args.output), fmt=args.format)
         return 0
-    if args.knowledge_command == "taxonomy":
+    if args.relations_command == "taxonomy":
         emit(taxonomy_payload(), fmt=args.format)
         return 0
-    raise AShareResearchError(f"unknown knowledge command: {args.knowledge_command}")
+    raise AShareResearchError(f"unknown relations command: {args.relations_command}")
 
 
 def _handle_runs(args: argparse.Namespace, reader: MartReader) -> int:
@@ -1396,7 +1358,7 @@ def _handle_runs(args: argparse.Namespace, reader: MartReader) -> int:
             mart_refs=args.mart_ref,
             feature_refs=args.feature_ref,
             evidence_path=Path(args.evidence) if args.evidence else None,
-            knowledge_path=Path(args.knowledge) if args.knowledge else None,
+            relations_path=Path(args.relations) if args.relations else None,
             model_output=model_output,
             validated_output=validated_output,
             agent_reasoning=agent_reasoning,

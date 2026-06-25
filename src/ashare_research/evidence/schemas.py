@@ -12,7 +12,7 @@ class EvidenceError(AShareResearchError):
 
 
 CONFIDENCE_VALUES = {"low", "medium", "high"}
-MATURITY_VALUES = {"prompt", "curated", "adapter"}
+MATURITY_VALUES = {"prompt", "curated", "fetched"}
 ALLOWED_SOURCE_TYPES = {
     "official",
     "exchange",
@@ -63,13 +63,13 @@ class EvidenceRecord:
     unit: str | None = None
     period: str | None = None
     frequency: str | None = None
-    needs_adapter: bool = False
+    needs_source: bool = False
     raw_excerpt: str | None = None
     supports: tuple[str, ...] = ()
     confidence_score: float | None = None
     quality_flags: tuple[str, ...] = ()
     maturity: str = "curated"
-    adapter_id: str | None = None
+    source_id: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "EvidenceRecord":
@@ -115,13 +115,13 @@ class EvidenceRecord:
             "query_time": self.query_time,
             "confidence": self.confidence,
             "verification": self.verification,
-            "needs_adapter": self.needs_adapter,
+            "needs_source": self.needs_source,
             "raw_excerpt": self.raw_excerpt,
             "supports": list(self.supports),
             "confidence_score": self.confidence_score,
             "quality_flags": list(self.quality_flags),
             "maturity": self.maturity,
-            "adapter_id": self.adapter_id,
+            "source_id": self.source_id,
         }
 
 

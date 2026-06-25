@@ -12,9 +12,17 @@ from .base import now_iso
 class TushareConnector:
     source = "tushare"
 
-    def __init__(self, *, token: str | None = None, proxy_url: str | None = None, client: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        token: str | None = None,
+        proxy_url: str | None = None,
+        timeout: int = 30,
+        client: Any = None,
+    ) -> None:
         self.token = _normalize(token) or _normalize(os.environ.get("TUSHARE_TOKEN"))
         self.proxy_url = _normalize(proxy_url) if proxy_url is not None else _normalize(os.environ.get("TUSHARE_PROXY_URL"))
+        self.timeout = _positive_int(timeout, "timeout")
         self._client = client
 
     def fetch(self, api_name: str, params: dict[str, Any], fields: list[str] | tuple[str, ...] | None = None) -> SourceResponse:
@@ -50,7 +58,7 @@ class TushareConnector:
         configure_tushare_proxy(self.proxy_url)
         if self.proxy_url:
             os.environ["TUSHARE_PROXY_URL"] = self.proxy_url
-        return ts.pro_api(self.token)
+        return ts.pro_api(self.token, timeout=self.timeout)
 
 
 _TUSHARE_DEFAULT_HTTP_URL: str | None = None
@@ -61,6 +69,16 @@ def _normalize(value: str | None) -> str | None:
         return None
     value = value.strip()
     return value or None
+
+
+def _positive_int(value: int, field_name: str) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as error:
+        raise ConnectorError(f"{field_name} must be a positive integer") from error
+    if normalized <= 0:
+        raise ConnectorError(f"{field_name} must be a positive integer")
+    return normalized
 
 
 def configure_tushare_proxy(proxy_url: str | None) -> None:

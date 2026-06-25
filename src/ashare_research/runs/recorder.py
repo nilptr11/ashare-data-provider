@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from ..evidence import EvidenceStore
 from ..features import FeatureRegistry, FeatureStore
-from ..knowledge import KnowledgeStore
+from ..relations import RelationStore
 from ..marts.reader import MartReader
 from ..paths import default_data_dir, default_runs_dir
 from ..reports import render_trace_report
@@ -37,7 +37,7 @@ class RunRecorder:
         mart_refs: list[str] | None = None,
         feature_refs: list[str] | None = None,
         evidence_path: Path | str | None = None,
-        knowledge_path: Path | str | None = None,
+        relations_path: Path | str | None = None,
         model_output: str | None = None,
         validated_output: dict[str, Any] | None = None,
         agent_reasoning: dict[str, Any] | None = None,
@@ -53,7 +53,7 @@ class RunRecorder:
         data_refs_payload = self._data_refs_payload(as_of=as_of, mart_refs=mart_refs or [], feature_refs=feature_refs or [])
         data_refs_artifact = self._write_json(run_dir / "data_refs.json", data_refs_payload, kind="data_refs")
         evidence_artifact = self._copy_or_create_evidence(run_dir, evidence_path)
-        knowledge_artifact = self._copy_or_create_knowledge(run_dir, knowledge_path)
+        relations_artifact = self._copy_or_create_relations(run_dir, relations_path)
         raw_output_artifact = self._write_text(run_dir / "model_output.raw.md", model_output or "", kind="model_output_raw")
         validated_payload = validated_output or {"schema": "ashare.model_output.validated.v1", "status": "not_provided"}
         validated_artifact = self._write_json(run_dir / "model_output.validated.json", validated_payload, kind="model_output_validated")
@@ -65,7 +65,7 @@ class RunRecorder:
             has_validated_output=validated_output is not None,
             validated_output=validated_output,
             evidence_artifact=evidence_artifact.to_dict(),
-            knowledge_artifact=knowledge_artifact.to_dict(),
+            relations_artifact=relations_artifact.to_dict(),
         )
         quality_artifact = self._write_json(run_dir / "quality_gates.json", quality_payload, kind="quality_gates")
         report_text = report or render_trace_report(
@@ -74,7 +74,7 @@ class RunRecorder:
             as_of=as_of,
             data_refs_artifact=data_refs_artifact,
             evidence_artifact=evidence_artifact,
-            knowledge_artifact=knowledge_artifact,
+            relations_artifact=relations_artifact,
             quality_gates=quality_payload,
         )
         report_artifact = self._write_text(run_dir / "report.md", report_text, kind="report")
@@ -86,7 +86,7 @@ class RunRecorder:
             question=question_artifact,
             data_refs=data_refs_artifact,
             evidence=evidence_artifact,
-            knowledge=knowledge_artifact,
+            relations=relations_artifact,
             model={"provider": "llm_agent", "name": "unspecified", "temperature": None},
             agent_reasoning=reasoning_payload,
             quality_gates=quality_payload,
@@ -189,18 +189,18 @@ class RunRecorder:
             target.write_text("", encoding="utf-8")
         return _artifact(target, "evidence")
 
-    def _copy_or_create_knowledge(self, run_dir: Path, knowledge_path: Path | str | None) -> RunArtifact:
-        target = run_dir / "knowledge_snapshot.json"
-        if knowledge_path:
-            source = Path(knowledge_path)
+    def _copy_or_create_relations(self, run_dir: Path, relations_path: Path | str | None) -> RunArtifact:
+        target = run_dir / "relations_snapshot.json"
+        if relations_path:
+            source = Path(relations_path)
             if not source.exists():
-                raise RunError(f"knowledge snapshot not found: {source}")
+                raise RunError(f"relations snapshot not found: {source}")
             shutil.copyfile(source, target)
         else:
-            snapshot = KnowledgeStore(self.data_dir).snapshot(output_path=target)
+            snapshot = RelationStore(self.data_dir).snapshot(output_path=target)
             snapshot.pop("path", None)
             target.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-        return _artifact(target, "knowledge")
+        return _artifact(target, "relations")
 
     def _write_text(self, path: Path, text: str, *, kind: str) -> RunArtifact:
         path.write_text(text, encoding="utf-8")

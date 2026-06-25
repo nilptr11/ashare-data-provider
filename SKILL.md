@@ -14,10 +14,10 @@ description: Use when an LLM agent researches A-share market themes, stock candi
 1. 把用户问题当作研究假设，不要直接当结论。
 2. 读 `references/data-map.md`，确认本地已有数据、适用边界和盲区。
 3. 检查数据日期、覆盖范围和质量；优先使用最小必要数据。
-4. 本地数据足够时，直接读取相关 mart、feature、evidence、knowledge。
+4. 本地数据足够时，直接读取相关 mart、feature、evidence、relations。
 5. 本地数据不足时，读 `references/source-registry.md`，从权威或可解释来源补证据。
 6. 用 `references/reasoning-policy.md` 区分事实、推断、假设和缺口。
-7. 需要复盘时，用 run 留痕记录问题、数据引用、证据、knowledge 快照和质量检查。
+7. 需要复盘时，用 run 留痕记录问题、数据引用、证据、relations 快照和质量检查。
 
 ## 交易模式输入
 
@@ -35,9 +35,20 @@ description: Use when an LLM agent researches A-share market themes, stock candi
 
 ## 补证和产业链梳理
 
-当本地 evidence 或 knowledge 不足以支撑产业链、公司暴露、客户、订单、产能、收入构成等结论时，继续按 `references/source-registry.md` 补权威来源。
+当本地 evidence 或 relations 不足以支撑产业链、公司暴露、客户、订单、产能、收入构成等结论时，继续按 `references/source-registry.md` 补权威来源。
 
-产业链研究要先梳理上游、中游、下游、设备、材料、零部件、应用等节点，再把公司映射到节点。可复用关系应通过 `knowledge propose` 形成 proposal；当次结论必须同时给出来源、日期和证据强弱。
+外部补证不能只写“来源：年报/公告/网页”。每条用于支撑结论的外部来源至少写清：
+
+- 来源类型和来源名；
+- URL 或接口；
+- 发布日期；
+- 抓取或查询时间；
+- 支撑的具体 claim；
+- 证据强弱和不确定性。
+
+产业链研究要先梳理上游、中游、下游、设备、材料、零部件、应用等节点，再把公司映射到节点。公司映射应能落到“节点 -> 公司 -> 证据 -> 强弱 -> 缺口”。凡是当次分析形成的可复用产业链节点、产品暴露、上下游、客户或供应关系，Codex 应直接用 `relations ingest` 落到 relations。当次结论必须同时给出来源、日期和证据强弱。
+
+候选池必须先从本地 feature / mart 的市场线索生成，再补公司证据。手写的已知公司名单只能作为先验观察单独标注，不能混进主筛选排序。没有可审计公司证据的公司，不应进入重点研究，只能列为市场线索或证据待补。
 
 ## 数据层级
 
@@ -46,14 +57,15 @@ description: Use when an LLM agent researches A-share market themes, stock candi
 | mart | `data/mart/` | 行情、指数、行业、公告、财务、资金等结构化事实 | 优先事实源 |
 | feature | `data/features/` | 可复现筛查、排序、聚合信号 | 不能单独当事实结论 |
 | evidence | `data/evidence/` | 产业价格、订单、产能、capex、政策、招投标等外部证据 | 补 mart 覆盖不了的事实 |
-| knowledge | `data/knowledge/` | accepted 公司、产品、客户、产业链关系 | 慢变量，不代表当日强弱 |
+| relations | `data/relations/` | 公司、产品、客户、产业链节点和关系 | 慢变量关系库；每条记录必须带来源或推理依据、置信度和有效期 |
 | runs / reports | `runs/`、`reports/` | 研究留痕和展示 | 不是事实源 |
 
 ## 研究纪律
 
 - 不输出买入、卖出、加仓、减仓、仓位、止盈止损、下单等交易执行指令。
 - 不用概念成分、热榜、人气或涨停池直接证明公司业务暴露度。
-- 公司产品、客户、订单、产能、收入构成必须有公告、财报、IR、交易所问询、合格 evidence 或 accepted knowledge 支撑。
+- 公司产品、客户、订单、产能、收入构成必须有公告、财报、IR、交易所问询、合格 evidence 或 traceable relations 支撑。
+- 重点候选必须逐一有可审计证据链；缺 URL、发布日期或查询时间时，结论降级。
 - Feature 只用于发现候选、强弱排序和交叉验证入口。
 - 缺数据时写明缺口和影响，不用模型记忆补成确定事实。
 - 用户给出的逻辑、小作文、研报摘要或其他 AI 结论默认是待验证假设。
@@ -69,7 +81,8 @@ uv run ashare mart meta DATASET --trade-date YYYYMMDD
 uv run ashare feature meta FEATURE --as-of YYYYMMDD --window 20
 uv run ashare feature read FEATURE --as-of YYYYMMDD --window 20 --columns COLS --sort SCORE --limit 30 --format json
 uv run ashare evidence search --industry INDUSTRY --format json
-uv run ashare knowledge search --entity ENTITY --format json
+uv run ashare relations search --entity ENTITY --format json
+uv run ashare relations ingest relations.json
 uv run ashare runs record --question "..." --as-of YYYYMMDD
 ```
 

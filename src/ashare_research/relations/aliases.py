@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .schemas import KnowledgeEntityRef, KnowledgeRecord
+from .schemas import RelationEntityRef, RelationRecord
 
 
-def build_alias_index(records: list[KnowledgeRecord]) -> dict[str, list[dict[str, str]]]:
+def build_alias_index(records: list[RelationRecord]) -> dict[str, list[dict[str, str]]]:
     index: dict[str, list[dict[str, str]]] = defaultdict(list)
     for record in records:
         for entity in (record.subject, record.object_ref):
@@ -15,7 +15,7 @@ def build_alias_index(records: list[KnowledgeRecord]) -> dict[str, list[dict[str
     return dict(index)
 
 
-def _entity_payload(entity: KnowledgeEntityRef) -> dict[str, str]:
+def _entity_payload(entity: RelationEntityRef) -> dict[str, str]:
     return {
         "type": entity.type,
         "id": entity.id,

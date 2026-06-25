@@ -59,6 +59,7 @@ def test_run_recorder_passes_supported_validated_output(tmp_path):
     assert manifest["quality_gates"]["status"] == "passed"
     assert manifest["quality_gates"]["gates"]["output_gate"]["status"] == "passed"
     assert manifest["quality_gates"]["gates"]["source_gate"]["status"] == "passed"
+    assert manifest["quality_gates"]["gates"]["source_audit_gate"]["status"] == "passed"
     assert manifest["quality_gates"]["gates"]["confidence_gate"]["status"] == "passed"
 
 
@@ -98,6 +99,49 @@ def test_run_recorder_blocks_core_candidate_with_weak_evidence(tmp_path):
     confidence_gate = manifest["quality_gates"]["gates"]["confidence_gate"]
     assert confidence_gate["status"] == "blocked"
     assert confidence_gate["details"]["candidates"] == ["000001.SZ"]
+
+
+def test_run_recorder_blocks_external_evidence_without_audit_fields(tmp_path):
+    _write_run_data_refs(tmp_path)
+    recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
+
+    manifest = recorder.record(
+        question="分析 AI 算力硬件链",
+        as_of="20260623",
+        mart_refs=["daily:trade_date=20260623"],
+        feature_refs=["market_strength:as_of=20260623,window=20"],
+        validated_output=_research_output(auditable=False),
+        run_id="missing_source_audit_run",
+    )
+
+    assert manifest["quality_gates"]["status"] == "blocked"
+    source_audit_gate = manifest["quality_gates"]["gates"]["source_audit_gate"]
+    assert source_audit_gate["status"] == "blocked"
+    assert source_audit_gate["details"]["items"][0]["missing_fields"] == [
+        "source_name",
+        "source_url",
+        "published_at",
+        "query_time",
+    ]
+
+
+def test_run_recorder_blocks_relation_exposure_without_source_id(tmp_path):
+    _write_run_data_refs(tmp_path)
+    recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
+
+    manifest = recorder.record(
+        question="分析 AI 算力硬件链",
+        as_of="20260623",
+        mart_refs=["daily:trade_date=20260623"],
+        feature_refs=["market_strength:as_of=20260623,window=20"],
+        validated_output=_research_output(exposure_source_kind="relations", source_id=False),
+        run_id="relation_without_source_id_run",
+    )
+
+    assert manifest["quality_gates"]["status"] == "blocked"
+    source_gate = manifest["quality_gates"]["gates"]["source_gate"]
+    assert source_gate["status"] == "blocked"
+    assert source_gate["details"]["items"][0]["source_kinds"] == ["relations"]
 
 
 def test_run_recorder_blocks_missing_data_refs(tmp_path):
@@ -180,12 +224,21 @@ def test_cli_runs_record_list_replay(capsys, tmp_path):
     assert replay_payload["status"] == "replayable"
 
 
-def _research_output(*, exposure_source_kind="evidence", evidence_strength="strong"):
+def _research_output(*, exposure_source_kind="evidence", evidence_strength="strong", auditable=True, source_id=True):
     exposure_fact = {
         "source_kind": exposure_source_kind,
-        "source_id": "evidence:ai-infra-order",
         "claim": "公司披露了 AI 算力硬件相关订单或产品暴露",
     }
+    if source_id:
+        exposure_fact["source_id"] = "evidence:ai-infra-order" if exposure_source_kind != "relations" else "relation:company_product:000001.SZ:ai_infra"
+    if auditable:
+        exposure_fact |= {
+            "source_type": "company_filing",
+            "source_name": "测试公司 2025 年年度报告",
+            "source_url": "https://example.com/annual-report",
+            "published_at": "2026-04-15",
+            "query_time": "2026-06-23T20:00:00+08:00",
+        }
     market_fact = {
         "source_kind": "mart",
         "source_id": "daily:trade_date=20260623",
@@ -273,6 +326,17 @@ def _research_output(*, exposure_source_kind="evidence", evidence_strength="stro
                 "claim": "公司披露了 AI 算力硬件相关订单或产品暴露",
                 "source_kind": "evidence",
                 "source_id": "evidence:ai-infra-order",
+                **(
+                    {
+                        "source_type": "company_filing",
+                        "source_name": "测试公司 2025 年年度报告",
+                        "source_url": "https://example.com/annual-report",
+                        "published_at": "2026-04-15",
+                        "query_time": "2026-06-23T20:00:00+08:00",
+                    }
+                    if auditable
+                    else {}
+                ),
                 "supports": ["000001.SZ", "optical"],
                 "verification": "official_single_source",
                 "confidence": "high",

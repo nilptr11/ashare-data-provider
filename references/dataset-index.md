@@ -44,11 +44,11 @@
 
 | 目标 | 优先数据 |
 | --- | --- |
-| 产业链拆解 | `references/source-registry.md`、evidence、accepted knowledge |
-| 公司产品/客户/订单 | 公告、年报、半年报、IR、问询回复、合格 evidence、accepted knowledge |
+| 产业链拆解 | `references/source-registry.md`、evidence、traceable relations |
+| 公司产品/客户/订单 | 公告、年报、半年报、IR、问询回复、合格 evidence、traceable relations |
 | 公司主营构成 | `fina_mainbz`、定期报告、公告 |
-| 产业价格/供需/capex/招投标 | evidence 或 accepted adapter |
-| 候选池分层 | mart/feature 发现线索，evidence/knowledge/财务验证暴露度 |
+| 产业价格/供需/capex/招投标 | evidence 或可复用来源拉取的 evidence |
+| 候选池分层 | mart/feature 发现线索，evidence/relations/财务验证暴露度 |
 
 ## 最小确认命令
 
@@ -58,5 +58,5 @@ uv run ashare mart meta DATASET --trade-date YYYYMMDD
 uv run ashare feature meta FEATURE --as-of YYYYMMDD --window N
 uv run ashare feature read FEATURE --as-of YYYYMMDD --window N --columns COLS --sort SCORE --limit 30 --format json
 uv run ashare evidence search --industry INDUSTRY --format json
-uv run ashare knowledge search --entity ENTITY --format json
+uv run ashare relations search --entity ENTITY --format json
 ```
