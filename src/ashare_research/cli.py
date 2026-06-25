@@ -534,7 +534,6 @@ def _daily_dataset_args(args: argparse.Namespace, task, *, as_of: str, event_day
         "timeout": 30,
         "scan_periods": 5,
         "param": [],
-        "fields": None,
         "token": args.token,
         "proxy_url": args.proxy_url,
         "env_file": args.env_file,
@@ -651,7 +650,7 @@ def _build_single_partition_dataset(args: argparse.Namespace, reader: MartReader
     partition = _partition_args(args)
     if not partition:
         raise AShareResearchError(f"{args.dataset}: partition is required")
-    fields = _fields(args.fields, spec.default_fields)
+    fields = list(spec.default_fields)
     connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
     responses, raw_paths, frame = _fetch_dataset_frame(connector, reader.data_dir, spec, args, partition, fields=fields)
     return _publish_dataset_frame(reader, spec, partition, frame, responses=responses, raw_paths=raw_paths, refresh=args.refresh)
@@ -898,7 +897,7 @@ def _build_member_dataset(args: argparse.Namespace, reader: MartReader, spec: Da
         raise AShareResearchError(f"{spec.driver_dataset}: missing driver code column")
     name_column = _first_existing_column(driver, spec.driver_name_columns)
     connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
-    fields = _fields(args.fields, spec.default_fields)
+    fields = list(spec.default_fields)
     base_params: dict[str, object] = {}
     if spec.maintenance_kind == "member_by_index_trade_date" and spec.date_param:
         base_params[spec.date_param] = _partition_value(partition)
@@ -1010,7 +1009,7 @@ def _build_stock_pool_daily_dataset(args: argparse.Namespace, reader: MartReader
     start_date = args.start_date or trade_date
     end_date = args.end_date or trade_date
     connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
-    fields = _fields(args.fields, spec.default_fields)
+    fields = list(spec.default_fields)
     codes = _stock_pool_codes(args, reader, connector, end_date)
     raw_store = RawStore(reader.data_dir)
     responses: list[SourceResponse] = []
@@ -1064,7 +1063,7 @@ def _build_stock_pool_financial_dataset(args: argparse.Namespace, reader: MartRe
         raise AShareResearchError(f"{spec.name}: --period or --end-date is required")
     start_date = args.start_date or end_date
     connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
-    fields = _fields(args.fields, spec.default_fields)
+    fields = list(spec.default_fields)
     codes = _stock_pool_codes(args, reader, connector, end_date)
     raw_store = RawStore(reader.data_dir)
     responses: list[SourceResponse] = []
@@ -1116,7 +1115,7 @@ def _build_disclosure_date_dataset(args: argparse.Namespace, reader: MartReader,
     if not period:
         raise AShareResearchError(f"{spec.name}: --period is required")
     partition = {"period": period}
-    fields = _fields(args.fields, spec.default_fields)
+    fields = list(spec.default_fields)
     connector = TushareConnector(token=args.token, proxy_url=args.proxy_url)
     responses, raw_paths, frame = _fetch_dataset_frame(connector, reader.data_dir, spec, args, partition, fields=fields)
     return _publish_dataset_frame(reader, spec, partition, frame, responses=responses, raw_paths=raw_paths, refresh=args.refresh)
@@ -1210,7 +1209,6 @@ def _add_data_build_parser(subparsers: argparse._SubParsersAction[argparse.Argum
     data_build.add_argument("--timeout", type=int, default=30, help="事件源请求超时秒数")
     data_build.add_argument("--scan-periods", type=int, default=5, help="业绩预告自动扫描最近报告期数量")
     data_build.add_argument("-p", "--param", action="append", default=[], help="额外 source 参数，key=value 或 key:=JSON")
-    data_build.add_argument("--fields", help="逗号分隔字段；默认使用 DatasetSpec.default_fields")
     data_build.add_argument("--token", help="Tushare token；默认读取 TUSHARE_TOKEN 或 .env")
     data_build.add_argument("--proxy-url", help="Tushare proxy url；默认读取 TUSHARE_PROXY_URL 或 .env")
     data_build.add_argument("--env-file", default=".env", help="环境变量文件；不存在时忽略")

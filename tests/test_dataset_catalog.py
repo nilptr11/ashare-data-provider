@@ -21,6 +21,12 @@ def test_builtin_catalog_contains_core_market_contracts():
     assert index_member_all.page_limit == 3000
     assert {"l1_code", "l2_code", "l3_code", "ts_code"} <= set(index_member_all.required_columns)
 
+    hsgt_top10 = catalog.require("hsgt_top10")
+    assert {"amount", "net_amount", "buy", "sell"} <= set(hsgt_top10.required_columns)
+    assert {"amount", "net_amount", "buy", "sell"} <= set(hsgt_top10.default_fields)
+    assert hsgt_top10.analysis_columns == ("amount",)
+    assert hsgt_top10.units["amount"] == "元"
+
 
 def test_catalog_discovery_marks_unregistered_mart(tmp_path):
     mart_root = tmp_path / "mart"

@@ -1,8 +1,10 @@
+from argparse import Namespace
 import json
 
 import pandas as pd
+import pytest
 
-from ashare_research.cli import main
+from ashare_research.cli import _build_dataset, main
 from ashare_research.connectors import TushareConnector
 from ashare_research.connectors.tushare import configure_tushare_proxy
 from ashare_research.datasets.catalog import DatasetCatalog
@@ -135,6 +137,80 @@ def test_cli_data_build_uses_connector_raw_store_and_publisher(monkeypatch, caps
     assert (tmp_path / "raw" / "tushare" / "daily").exists()
 
 
+@pytest.mark.parametrize("command", ["build", "update"])
+def test_cli_data_build_and_update_reject_field_overrides(command, capsys, tmp_path):
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "--data-dir",
+                str(tmp_path),
+                "data",
+                command,
+                "daily",
+                "--trade-date",
+                "20260623",
+                "--fields",
+                "ts_code,trade_date",
+            ]
+        )
+
+    assert error.value.code == 2
+    assert "unrecognized arguments: --fields" in capsys.readouterr().err
+
+
+def test_data_build_ignores_programmatic_fields_override(monkeypatch, tmp_path):
+    calls = []
+    frame = pd.DataFrame(
+        [
+            {
+                "ts_code": "000001.SZ",
+                "trade_date": "20260623",
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.0,
+                "close": 10.5,
+                "pre_close": 10.0,
+                "change": 0.5,
+                "pct_chg": 5.0,
+                "vol": 100.0,
+                "amount": 1000.0,
+            }
+        ]
+    )
+
+    class FakeConnector:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, api_name, params, fields=None):
+            calls.append(tuple(fields or ()))
+            return TushareConnector(client=FakeTushareClient(frame)).fetch(api_name, params, fields)
+
+    monkeypatch.setattr("ashare_research.cli.TushareConnector", FakeConnector)
+
+    args = Namespace(
+        dataset="daily",
+        trade_date="20260623",
+        snapshot_date=None,
+        exchange=None,
+        period=None,
+        publish_date=None,
+        start_date=None,
+        end_date=None,
+        param=[],
+        fields="ts_code,trade_date",
+        token=None,
+        proxy_url=None,
+        env_file=None,
+        refresh=False,
+    )
+
+    payload = _build_dataset(args, MartReader(tmp_path, DatasetCatalog.builtin()))
+
+    assert payload["quality_status"] == "ok"
+    assert calls == [DatasetCatalog.builtin().require("daily").default_fields]
+
+
 def test_cli_data_update_is_build_alias(monkeypatch, capsys, tmp_path):
     frame = pd.DataFrame(
         [
@@ -235,6 +311,61 @@ def test_cli_data_build_expands_index_daily_variants(monkeypatch, capsys, tmp_pa
         "399006.SZ",
     }
     assert (tmp_path / "mart" / "index_daily" / "trade_date=20260623" / "part.parquet").exists()
+
+
+def test_cli_data_build_hsgt_top10_requests_amount_fields(monkeypatch, capsys, tmp_path):
+    calls = []
+
+    class FakeConnector:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, api_name, params, fields=None):
+            calls.append({"params": dict(params), "fields": tuple(fields or ())})
+            market_type = str(params["market_type"])
+            frame = pd.DataFrame(
+                [
+                    {
+                        "trade_date": params["trade_date"],
+                        "ts_code": "600519.SH" if market_type == "1" else "000001.SZ",
+                        "name": "样本股",
+                        "close": 100.0,
+                        "change": 1.0,
+                        "rank": 1,
+                        "market_type": market_type,
+                        "amount": 1000.0,
+                        "net_amount": None,
+                        "buy": None,
+                        "sell": None,
+                    }
+                ]
+            )
+            return TushareConnector(client=FakeTushareClient(frame)).fetch(api_name, params, fields)
+
+    monkeypatch.setattr("ashare_research.cli.TushareConnector", FakeConnector)
+
+    exit_code = main(
+        [
+            "--data-dir",
+            str(tmp_path),
+            "data",
+            "build",
+            "hsgt_top10",
+            "--trade-date",
+            "20260623",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dataset"] == "hsgt_top10"
+    assert payload["rows"] == 2
+    assert payload["quality_status"] == "ok"
+    assert {call["params"]["market_type"] for call in calls} == {"1", "3"}
+    assert all({"amount", "net_amount", "buy", "sell"} <= set(call["fields"]) for call in calls)
+
+    frame = pd.read_parquet(tmp_path / "mart" / "hsgt_top10" / "trade_date=20260623" / "part.parquet")
+    assert {"amount", "net_amount", "buy", "sell", "_variant"} <= set(frame.columns)
 
 
 def test_cli_data_update_publishes_akshare_notice(monkeypatch, capsys, tmp_path):
