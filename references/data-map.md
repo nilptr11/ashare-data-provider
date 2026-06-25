@@ -85,4 +85,4 @@ uv run ashare mart meta DATASET --trade-date YYYYMMDD
 uv run ashare feature meta FEATURE --as-of YYYYMMDD --window 20
 ```
 
-详细命令只在需要维护、补数或抽样核验时使用，见 `references/data-access-guide.md`。
+详细命令只在需要维护、补数、抽样核验或留痕时使用；不要把命令清单当成固定研究流程。

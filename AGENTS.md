@@ -1,16 +1,21 @@
-# Skill 入口
+@/Users/admin/.codex/RTK.md
+
+--- project-doc ---
+
+# 项目入口
 
 本项目是 LLM skill 风格的 A 股研究数据底座，不是 Agent runtime、API 服务或自动化交易系统。
 
-先读 [`SKILL.md`](SKILL.md)。`SKILL.md` 定义项目定位、默认使用方式、数据层级、研究纪律和最小工具面。
+先读 [`SKILL.md`](SKILL.md)。它定义项目定位、数据层级、研究纪律和最小工具面。
 
 ## 使用顺序
 
 1. 读 `SKILL.md`。
 2. 读 `references/data-map.md`，确认本地已准备数据和适用边界。
-3. 只有本地数据不足时，读 `references/source-registry.md` 去找权威补证来源。
-4. 按需读取 `references/reasoning-policy.md`、`prompts/` 或 protocol schema。
-5. CLI 只用于检查、抽样、维护、补数、校验和留痕，不是固定研究流程。
+3. 需要定位具体 dataset / feature 时，读 `references/dataset-index.md`。
+4. 只有本地数据不足时，读 `references/source-registry.md` 找权威补证来源。
+5. 对事实、推断、假设和缺口拿不准时，读 `references/reasoning-policy.md`。
+6. 需要结构化输出时，使用 `industry_chain_selection.v1`；不要发明新的默认流程。
 
 ## 研究边界
 

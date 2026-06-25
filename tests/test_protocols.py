@@ -4,19 +4,12 @@ from ashare_research.cli import main
 from ashare_research.protocols import ProtocolRegistry
 
 
-def test_builtin_protocol_registry_loads_market_structure():
+def test_builtin_protocol_registry_loads_single_research_protocol():
     registry = ProtocolRegistry.builtin()
-    spec = registry.require("market_structure.v1")
+    specs = registry.list()
 
-    assert spec.title == "市场结构分析"
-    assert "market_data" in spec.required_inputs
-    assert "gap_gate" in spec.quality_gates
-
-
-def test_builtin_protocol_registry_loads_industry_chain_selection():
-    registry = ProtocolRegistry.builtin()
-    spec = registry.require("industry_chain_selection.v1")
-
+    assert [spec.protocol_id for spec in specs] == ["industry_chain_selection.v1"]
+    spec = specs[0]
     assert spec.title == "主线选股与产业链拆解"
     assert "market_data" in spec.required_inputs
     assert "candidate_pool" in spec.required_sections
@@ -24,10 +17,10 @@ def test_builtin_protocol_registry_loads_industry_chain_selection():
 
 
 def test_protocol_registry_validate():
-    payload = ProtocolRegistry.builtin().validate("market_structure.v1")
+    payload = ProtocolRegistry.builtin().validate("industry_chain_selection.v1")
 
     assert payload["status"] == "ready"
-    assert payload["protocols"][0]["protocol_id"] == "market_structure.v1"
+    assert payload["protocols"][0]["protocol_id"] == "industry_chain_selection.v1"
     assert payload["protocols"][0]["output_schema_status"] == "ready"
 
 
@@ -36,16 +29,8 @@ def test_protocol_registry_validate_all_protocols():
     protocol_ids = {item["protocol_id"] for item in payload["protocols"]}
 
     assert payload["status"] == "ready"
-    assert {"market_structure.v1", "industry_chain_selection.v1"}.issubset(protocol_ids)
+    assert protocol_ids == {"industry_chain_selection.v1"}
     assert all(item["output_schema_status"] == "ready" for item in payload["protocols"])
-
-
-def test_protocol_registry_loads_output_schema():
-    registry = ProtocolRegistry.builtin()
-    schema = registry.output_schema("ashare.protocol_output.market_structure.v1")
-
-    assert schema["$id"] == "ashare.protocol_output.market_structure.v1"
-    assert "era_direction" in schema["properties"]
 
 
 def test_protocol_registry_loads_industry_chain_output_schema():
@@ -61,28 +46,17 @@ def test_cli_protocols_list_show_validate(capsys):
     exit_code = main(["protocols", "list", "--format", "json"])
     assert exit_code == 0
     list_payload = json.loads(capsys.readouterr().out)
-    protocol_ids = {item["protocol_id"] for item in list_payload}
-    assert {"market_structure.v1", "industry_chain_selection.v1"}.issubset(protocol_ids)
-
-    exit_code = main(["protocols", "show", "market_structure.v1"])
-    assert exit_code == 0
-    show_payload = json.loads(capsys.readouterr().out)
-    assert show_payload["output_schema"] == "ashare.protocol_output.market_structure.v1"
-
-    exit_code = main(["protocols", "validate", "market_structure.v1"])
-    assert exit_code == 0
-    validate_payload = json.loads(capsys.readouterr().out)
-    assert validate_payload["status"] == "ready"
-
-    exit_code = main(["protocols", "output-schema", "market_structure.v1"])
-    assert exit_code == 0
-    schema_payload = json.loads(capsys.readouterr().out)
-    assert schema_payload["$id"] == "ashare.protocol_output.market_structure.v1"
+    assert [item["protocol_id"] for item in list_payload] == ["industry_chain_selection.v1"]
 
     exit_code = main(["protocols", "show", "industry_chain_selection.v1"])
     assert exit_code == 0
     show_payload = json.loads(capsys.readouterr().out)
     assert show_payload["output_schema"] == "ashare.protocol_output.industry_chain_selection.v1"
+
+    exit_code = main(["protocols", "validate", "industry_chain_selection.v1"])
+    assert exit_code == 0
+    validate_payload = json.loads(capsys.readouterr().out)
+    assert validate_payload["status"] == "ready"
 
     exit_code = main(["protocols", "output-schema", "industry_chain_selection.v1"])
     assert exit_code == 0

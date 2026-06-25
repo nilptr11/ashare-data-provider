@@ -14,7 +14,7 @@ def test_run_recorder_records_and_replays(tmp_path):
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
-        question="按市场结构框架分析 AI 算力硬件链",
+        question="分析 AI 算力硬件链",
         as_of="20260623",
         mart_refs=["daily:trade_date=20260623"],
         feature_refs=["market_strength:as_of=20260623,window=20"],
@@ -49,23 +49,83 @@ def test_run_recorder_uses_registered_protocol_when_requested(tmp_path):
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
-        question="按市场结构框架分析 AI 算力硬件链",
+        question="按主线选股与产业链拆解协议分析 AI 算力硬件链",
         as_of="20260623",
-        protocol_id="market_structure.v1",
+        protocol_id="industry_chain_selection.v1",
         mart_refs=["daily:trade_date=20260623"],
         feature_refs=["market_strength:as_of=20260623,window=20"],
         run_id="registered_protocol_run",
     )
 
-    assert manifest["protocol_id"] == "market_structure.v1"
+    assert manifest["protocol_id"] == "industry_chain_selection.v1"
     assert manifest["quality_gates"]["status"] == "warning"
+
+
+def test_run_recorder_passes_supported_validated_output(tmp_path):
+    _write_run_data_refs(tmp_path)
+    recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
+
+    manifest = recorder.record(
+        question="按主线选股与产业链拆解协议分析 AI 算力硬件链",
+        as_of="20260623",
+        protocol_id="industry_chain_selection.v1",
+        mart_refs=["daily:trade_date=20260623"],
+        feature_refs=["market_strength:as_of=20260623,window=20"],
+        validated_output=_industry_chain_output(),
+        run_id="supported_output_run",
+    )
+
+    assert manifest["quality_gates"]["status"] == "passed"
+    assert manifest["quality_gates"]["gates"]["schema_gate"]["status"] == "passed"
+    assert manifest["quality_gates"]["gates"]["source_gate"]["status"] == "passed"
+    assert manifest["quality_gates"]["gates"]["confidence_gate"]["status"] == "passed"
+
+
+def test_run_recorder_blocks_core_candidate_without_exposure_source(tmp_path):
+    _write_run_data_refs(tmp_path)
+    recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
+
+    manifest = recorder.record(
+        question="按主线选股与产业链拆解协议分析 AI 算力硬件链",
+        as_of="20260623",
+        protocol_id="industry_chain_selection.v1",
+        mart_refs=["daily:trade_date=20260623"],
+        feature_refs=["market_strength:as_of=20260623,window=20"],
+        validated_output=_industry_chain_output(exposure_source_kind="feature"),
+        run_id="feature_only_exposure_run",
+    )
+
+    assert manifest["quality_gates"]["status"] == "blocked"
+    source_gate = manifest["quality_gates"]["gates"]["source_gate"]
+    assert source_gate["status"] == "blocked"
+    assert source_gate["details"]["items"][0]["source_kinds"] == ["feature"]
+
+
+def test_run_recorder_blocks_core_candidate_with_weak_evidence(tmp_path):
+    _write_run_data_refs(tmp_path)
+    recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
+
+    manifest = recorder.record(
+        question="按主线选股与产业链拆解协议分析 AI 算力硬件链",
+        as_of="20260623",
+        protocol_id="industry_chain_selection.v1",
+        mart_refs=["daily:trade_date=20260623"],
+        feature_refs=["market_strength:as_of=20260623,window=20"],
+        validated_output=_industry_chain_output(evidence_strength="weak"),
+        run_id="weak_core_evidence_run",
+    )
+
+    assert manifest["quality_gates"]["status"] == "blocked"
+    confidence_gate = manifest["quality_gates"]["gates"]["confidence_gate"]
+    assert confidence_gate["status"] == "blocked"
+    assert confidence_gate["details"]["candidates"] == ["000001.SZ"]
 
 
 def test_run_recorder_blocks_missing_data_refs(tmp_path):
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
-        question="按市场结构框架分析 AI 算力硬件链",
+        question="分析 AI 算力硬件链",
         as_of="20260623",
         mart_refs=["daily:trade_date=20260623"],
         feature_refs=["market_strength:as_of=20260623,window=20"],
@@ -110,7 +170,7 @@ def test_cli_runs_record_list_replay(capsys, tmp_path):
             "runs",
             "record",
             "--question",
-            "按市场结构框架分析 AI 算力硬件链",
+            "分析 AI 算力硬件链",
             "--as-of",
             "20260623",
             "--mart-ref",
@@ -140,6 +200,117 @@ def test_cli_runs_record_list_replay(capsys, tmp_path):
     assert exit_code == 0
     replay_payload = json.loads(capsys.readouterr().out)
     assert replay_payload["status"] == "replayable"
+
+
+def _industry_chain_output(*, exposure_source_kind="evidence", evidence_strength="strong"):
+    exposure_fact = {
+        "source_kind": exposure_source_kind,
+        "source_id": "evidence:ai-infra-order",
+        "claim": "公司披露了 AI 算力硬件相关订单或产品暴露",
+    }
+    market_fact = {
+        "source_kind": "mart",
+        "source_id": "daily:trade_date=20260623",
+        "claim": "当日行情分区可用",
+    }
+    return {
+        "schema": "ashare.protocol_output.industry_chain_selection.v1",
+        "as_of": "20260623",
+        "question": "按主线选股与产业链拆解协议分析 AI 算力硬件链",
+        "research_scope": {
+            "objective": "验证 AI 算力硬件链候选",
+            "system_positioning": "研究输出，不是交易指令",
+            "non_goals": ["不输出交易指令"],
+            "research_states": ["core_research", "elastic_watch", "laggard_watch", "evidence_needed", "excluded"],
+        },
+        "theme_identification": {
+            "summary": "AI 算力硬件链存在市场关注线索",
+            "facts": [market_fact],
+            "inference": "需要继续验证公司暴露度",
+            "confidence": "medium",
+        },
+        "industry_chain_map": [
+            {
+                "segment_id": "optical",
+                "segment_name": "光模块",
+                "chain_layer": "components",
+                "role": "算力网络传输组件",
+                "prosperity_drivers": ["AI capex"],
+                "constraints": ["产能和客户验证"],
+                "facts": [exposure_fact],
+                "confidence": "medium",
+            }
+        ],
+        "revaluation_segments": [
+            {
+                "segment_id": "optical",
+                "reason": "市场关注和产业证据共同支持继续研究",
+                "market_validation": {
+                    "summary": "行情可用",
+                    "facts": [market_fact],
+                    "inference": "有市场关注线索",
+                    "confidence": "medium",
+                },
+                "fundamental_validation": {
+                    "summary": "存在公司暴露证据",
+                    "facts": [exposure_fact],
+                    "inference": "可进入核心研究",
+                    "confidence": "medium",
+                },
+                "risk_flags": [],
+                "confidence": "medium",
+            }
+        ],
+        "company_mapping": [
+            {
+                "ts_code": "000001.SZ",
+                "name": "测试公司",
+                "segments": ["optical"],
+                "exposure_level": "direct",
+                "exposure_evidence": [exposure_fact],
+                "market_validation": {
+                    "summary": "行情分区可用",
+                    "facts": [market_fact],
+                    "inference": "市场数据支持交叉验证",
+                    "confidence": "medium",
+                },
+                "fundamental_validation": {
+                    "summary": "暴露证据可追溯",
+                    "facts": [exposure_fact],
+                    "inference": "业务暴露度不是概念成分单独推断",
+                    "confidence": "medium",
+                },
+                "risk_flags": [],
+                "confidence": "medium",
+            }
+        ],
+        "candidate_pool": [
+            {
+                "ts_code": "000001.SZ",
+                "name": "测试公司",
+                "research_state": "core_research",
+                "rationale": "公司暴露度和市场数据均有可追溯引用",
+                "evidence_strength": evidence_strength,
+                "missing_evidence": [],
+                "risk_flags": [],
+            }
+        ],
+        "evidence_matrix": [
+            {
+                "topic": "company_exposure",
+                "claim": "公司披露了 AI 算力硬件相关订单或产品暴露",
+                "source_kind": "evidence",
+                "source_id": "evidence:ai-infra-order",
+                "supports": ["000001.SZ", "optical"],
+                "verification": "official_single_source",
+                "confidence": "high",
+            }
+        ],
+        "data_gaps": [],
+        "follow_up_plan": [],
+        "invalid_if": ["后续公告否认相关业务暴露"],
+        "confidence": "medium",
+    }
 
 
 def _write_run_data_refs(data_dir):

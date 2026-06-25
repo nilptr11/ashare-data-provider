@@ -69,6 +69,7 @@ class RunRecorder:
             data_refs=data_refs_payload,
             as_of=as_of,
             has_validated_output=validated_output is not None,
+            validated_output=validated_output,
             evidence_artifact=evidence_artifact.to_dict(),
             knowledge_artifact=knowledge_artifact.to_dict(),
         )
