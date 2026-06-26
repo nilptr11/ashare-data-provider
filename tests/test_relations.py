@@ -74,7 +74,7 @@ def test_relations_accepts_codex_inference_with_raw_ref_and_note(tmp_path):
         source={
             "source_type": "codex_inference",
             "source_name": "Codex research run",
-            "raw_ref": "runs/20260625_ai_pcb/run.json#model_output",
+            "raw_ref": "data/runs/20260625_ai_pcb/run.json#model_output",
         },
         note="由 AI PCB 材料需求、玻纤介电性能要求和候选公司披露交叉推理得出。",
     )
@@ -90,7 +90,7 @@ def test_relations_requires_note_for_codex_inference(tmp_path):
         source={
             "source_type": "codex_inference",
             "source_name": "Codex research run",
-            "raw_ref": "runs/20260625_ai_pcb/run.json#model_output",
+            "raw_ref": "data/runs/20260625_ai_pcb/run.json#model_output",
         },
         note=None,
     )

@@ -19,8 +19,8 @@
 | 层 | 内容 | 作用 |
 | --- | --- | --- |
 | 数据事实层 | `data/mart`、`data/features`、`data/evidence`、`data/relations` | 提供事实、信号、证据和 traceable 慢变量关系 |
-| 研究纪律层 | `SKILL.md`、`references/data-map.md`、`references/source-registry.md`、`references/reasoning-policy.md`、`references/dataset-index.md` | 告诉 LLM 怎么读数据、怎么降级、哪些结论不能越界 |
-| 留痕层 | `runs`、`reports` | 记录一次研究用了什么材料和质量检查结果 |
+| 研究纪律层 | `SKILL.md`、`references/data-map.md`、`references/source-registry.md`、`references/reasoning-policy.md`、`references/dataset-index.md`、`references/prompts/` | 告诉 LLM 怎么读数据、怎么降级、哪些结论不能越界 |
+| 留痕层 | `data/runs`、`data/reports` | 记录一次研究用了什么材料和质量检查结果 |
 
 ## 系统架构
 
@@ -37,9 +37,10 @@
      - evidence：外部产业证据
      - relations：带来源或推理依据、置信度的慢变量关系
   -> 按 reasoning-policy 区分事实、推断、假设和缺口
+  -> 对补到且用于结论的权威来源执行 evidence ingest
   -> 输出研究结论
   -> 对可复用产业链关系执行 relations ingest
-  -> 可选：用 runs 做留痕和质量检查
+  -> 可选：用 runs + validated output 做留痕和质量检查
 ```
 
 用户输入的交易模式用于帮助 LLM 决定“先看什么、什么能证明、什么只能作为线索”。
@@ -52,11 +53,16 @@
   -> 检查数据日期、覆盖范围和质量
   -> 读取最小必要 mart / feature / evidence / relations
   -> 本地数据不足时按 references/source-registry.md 补权威证据
+  -> 补到的关键证据先验证并入库 evidence
   -> 输出事实、推断、假设、缺口和降级影响
   -> 需要复盘时 runs record 留痕
 ```
 
-没有默认 playbook。没有通用 prompt。没有“按某个问题生成研究报告”的 CLI。
+没有默认 playbook，也没有“按某个问题生成研究报告”的 CLI。特定研究模式可以沉淀在 `references/prompts/`，作为稳定研究约束，而不是让 LLM 每次临场归纳长文。
+
+当前已沉淀：
+
+- `references/prompts/industry-chain-trend.md`：产业主线扩散研究，适合强产业周期、结构性行情、产业链上中下游拆解、辐射行业和公司映射。
 
 ## 数据边界
 
@@ -64,7 +70,7 @@
 - `feature`：市场强弱、行业/概念强弱、情绪、龙头验证、高弹性候选等可复现筛查信号。
 - `evidence`：项目内 mart 覆盖不了的产业价格、订单、产能、capex、政策、招投标等外部证据。
 - `relations`：公司、产品、客户、产业链节点和关系等慢变量；Codex 分析后直接写入，每条记录必须带来源或推理依据、置信度和有效期。
-- `runs` / `reports`：研究留痕和展示，不回流为事实源。
+- `data/runs` / `data/reports`：研究留痕和展示，不回流为事实源。
 
 Feature 分数、概念成分、热榜、人气或涨停池不能单独证明公司业务暴露度。
 
@@ -106,6 +112,7 @@ uv run ashare relations search --entity ENTITY --format json
 维护证据和关系：
 
 ```bash
+uv run ashare evidence validate evidence.json
 uv run ashare evidence ingest evidence.json
 uv run ashare evidence source-candidates --min-records 3
 uv run ashare evidence sources fetch SOURCE_ID
@@ -118,8 +125,12 @@ uv run ashare relations ingest relations.json
 记录研究留痕：
 
 ```bash
-uv run ashare runs record --question "..." --as-of YYYYMMDD --mart-ref daily:trade_date=YYYYMMDD --feature-ref market_strength:as_of=YYYYMMDD,window=20
+uv run ashare runs record --question "..." --as-of YYYYMMDD --mart-ref daily:trade_date=YYYYMMDD --feature-ref market_strength:as_of=YYYYMMDD,window=20 --model-output-file market-research.md --validated-output model_output.validated.json
 ```
+
+`runs record` 不解析 Markdown 报告里的结论。需要质量门检查公司暴露、证据强弱和外部来源审计时，必须传入 `model_output.validated.json`。
+
+`runs record` 默认写入当前数据目录下的 `runs`，也就是 `data/runs/`；使用 `--data-dir` 时会写入对应数据目录的 `runs/`。只有需要单独归档时才使用 `--runs-dir` 覆盖。
 
 ## 非目标
 
@@ -136,3 +147,4 @@ uv run ashare runs record --question "..." --as-of YYYYMMDD --mart-ref daily:tra
 - [references/dataset-index.md](references/dataset-index.md)：常用 dataset / feature 快速定位。
 - [references/source-registry.md](references/source-registry.md)：本地数据不足时的权威补证来源。
 - [references/reasoning-policy.md](references/reasoning-policy.md)：事实、推断、假设和缺口的边界。
+- [references/prompts/industry-chain-trend.md](references/prompts/industry-chain-trend.md)：产业主线扩散研究提示词。

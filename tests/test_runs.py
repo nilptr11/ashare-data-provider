@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from ashare_research.cli import main
+from ashare_research.evidence import EvidenceStore
 from ashare_research.features import FeatureRegistry, FeatureStore
 from ashare_research.marts.publisher import MartPublisher
 from ashare_research.runs import RunRecorder, replay_run
@@ -43,8 +44,25 @@ def test_run_recorder_records_and_replays(tmp_path):
     assert any(item["kind"] == "data_refs" for item in replay["artifacts"])
 
 
+def test_run_recorder_defaults_runs_dir_under_data_dir(tmp_path):
+    _write_run_data_refs(tmp_path)
+    recorder = RunRecorder(tmp_path)
+
+    manifest = recorder.record(
+        question="分析 AI 算力硬件链",
+        as_of="20260623",
+        mart_refs=["daily:trade_date=20260623"],
+        feature_refs=["market_strength:as_of=20260623,window=20"],
+        run_id="default_runs_dir",
+    )
+
+    assert Path(manifest["path"]).parent == tmp_path / "runs"
+    assert (tmp_path / "runs" / "default_runs_dir" / "run.json").exists()
+
+
 def test_run_recorder_passes_supported_validated_output(tmp_path):
     _write_run_data_refs(tmp_path)
+    _write_supporting_evidence(tmp_path)
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
@@ -84,6 +102,7 @@ def test_run_recorder_blocks_core_candidate_without_exposure_source(tmp_path):
 
 def test_run_recorder_blocks_core_candidate_with_weak_evidence(tmp_path):
     _write_run_data_refs(tmp_path)
+    _write_supporting_evidence(tmp_path)
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
@@ -103,6 +122,7 @@ def test_run_recorder_blocks_core_candidate_with_weak_evidence(tmp_path):
 
 def test_run_recorder_blocks_external_evidence_without_audit_fields(tmp_path):
     _write_run_data_refs(tmp_path)
+    _write_supporting_evidence(tmp_path)
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
     manifest = recorder.record(
@@ -144,6 +164,26 @@ def test_run_recorder_blocks_relation_exposure_without_source_id(tmp_path):
     assert source_gate["details"]["items"][0]["source_kinds"] == ["relations"]
 
 
+def test_run_recorder_blocks_relation_reference_not_in_artifact(tmp_path):
+    _write_run_data_refs(tmp_path)
+    _write_supporting_evidence(tmp_path)
+    recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
+
+    manifest = recorder.record(
+        question="分析 AI 算力硬件链",
+        as_of="20260623",
+        mart_refs=["daily:trade_date=20260623"],
+        feature_refs=["market_strength:as_of=20260623,window=20"],
+        validated_output=_research_output(exposure_source_kind="relations"),
+        run_id="missing_relation_artifact_ref_run",
+    )
+
+    source_gate = manifest["quality_gates"]["gates"]["source_gate"]
+    assert manifest["quality_gates"]["status"] == "blocked"
+    assert source_gate["status"] == "blocked"
+    assert source_gate["details"]["items"][0]["source_kind"] == "relations"
+
+
 def test_run_recorder_blocks_missing_data_refs(tmp_path):
     recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
 
@@ -163,6 +203,25 @@ def test_run_recorder_blocks_missing_data_refs(tmp_path):
     assert data_refs["features"][0]["status"] == "missing"
     assert manifest["quality_gates"]["status"] == "blocked"
     assert manifest["quality_gates"]["gates"]["data_refs_gate"]["status"] == "blocked"
+
+
+def test_run_recorder_blocks_evidence_reference_not_in_artifact(tmp_path):
+    _write_run_data_refs(tmp_path)
+    recorder = RunRecorder(tmp_path, runs_dir=tmp_path / "runs")
+
+    manifest = recorder.record(
+        question="分析 AI 算力硬件链",
+        as_of="20260623",
+        mart_refs=["daily:trade_date=20260623"],
+        feature_refs=["market_strength:as_of=20260623,window=20"],
+        validated_output=_research_output(),
+        run_id="missing_evidence_artifact_ref_run",
+    )
+
+    source_gate = manifest["quality_gates"]["gates"]["source_gate"]
+    assert manifest["quality_gates"]["status"] == "blocked"
+    assert source_gate["status"] == "blocked"
+    assert source_gate["details"]["items"][0]["source_kind"] == "evidence"
 
 
 def test_cli_runs_record_list_replay(capsys, tmp_path):
@@ -230,7 +289,12 @@ def _research_output(*, exposure_source_kind="evidence", evidence_strength="stro
         "claim": "公司披露了 AI 算力硬件相关订单或产品暴露",
     }
     if source_id:
-        exposure_fact["source_id"] = "evidence:ai-infra-order" if exposure_source_kind != "relations" else "relation:company_product:000001.SZ:ai_infra"
+        if exposure_source_kind == "relations":
+            exposure_fact["source_id"] = "relation:company_product:000001.SZ:ai_infra"
+        elif exposure_source_kind == "evidence":
+            exposure_fact["evidence_id"] = "evidence:ai-infra-order"
+        else:
+            exposure_fact["source_id"] = "evidence:ai-infra-order"
     if auditable:
         exposure_fact |= {
             "source_type": "company_filing",
@@ -325,7 +389,7 @@ def _research_output(*, exposure_source_kind="evidence", evidence_strength="stro
                 "topic": "company_exposure",
                 "claim": "公司披露了 AI 算力硬件相关订单或产品暴露",
                 "source_kind": "evidence",
-                "source_id": "evidence:ai-infra-order",
+                "evidence_id": "evidence:ai-infra-order",
                 **(
                     {
                         "source_type": "company_filing",
@@ -347,6 +411,27 @@ def _research_output(*, exposure_source_kind="evidence", evidence_strength="stro
         "invalid_if": ["后续公告否认相关业务暴露"],
         "confidence": "medium",
     }
+
+
+def _write_supporting_evidence(data_dir):
+    EvidenceStore(data_dir).ingest_evidence(
+        {
+            "evidence_id": "evidence:ai-infra-order",
+            "claim": "公司披露了 AI 算力硬件相关订单或产品暴露",
+            "topic": "company_exposure",
+            "industry": "ai_infrastructure",
+            "product": "optical",
+            "company": "000001.SZ",
+            "source_type": "company_filing",
+            "source_name": "测试公司 2025 年年度报告",
+            "source_url": "https://example.com/annual-report",
+            "published_at": "2026-04-15",
+            "query_time": "2026-06-23T20:00:00+08:00",
+            "confidence": "high",
+            "verification": "official_single_source",
+            "supports": ["000001.SZ", "optical"],
+        }
+    )
 
 
 def _write_run_data_refs(data_dir):

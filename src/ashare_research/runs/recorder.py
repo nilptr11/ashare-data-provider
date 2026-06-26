@@ -27,7 +27,7 @@ class RunError(AShareResearchError):
 class RunRecorder:
     def __init__(self, data_dir: Path | str | None = None, runs_dir: Path | str | None = None) -> None:
         self.data_dir = Path(data_dir) if data_dir is not None else default_data_dir()
-        self.runs_dir = Path(runs_dir) if runs_dir is not None else default_runs_dir()
+        self.runs_dir = Path(runs_dir) if runs_dir is not None else default_runs_dir(self.data_dir)
 
     def record(
         self,
@@ -54,6 +54,8 @@ class RunRecorder:
         data_refs_artifact = self._write_json(run_dir / "data_refs.json", data_refs_payload, kind="data_refs")
         evidence_artifact = self._copy_or_create_evidence(run_dir, evidence_path)
         relations_artifact = self._copy_or_create_relations(run_dir, relations_path)
+        evidence_context = evidence_artifact.to_dict() | _evidence_artifact_context(run_dir / evidence_artifact.path)
+        relations_context = relations_artifact.to_dict() | _relations_artifact_context(run_dir / relations_artifact.path)
         raw_output_artifact = self._write_text(run_dir / "model_output.raw.md", model_output or "", kind="model_output_raw")
         validated_payload = validated_output or {"schema": "ashare.model_output.validated.v1", "status": "not_provided"}
         validated_artifact = self._write_json(run_dir / "model_output.validated.json", validated_payload, kind="model_output_validated")
@@ -64,8 +66,8 @@ class RunRecorder:
             as_of=as_of,
             has_validated_output=validated_output is not None,
             validated_output=validated_output,
-            evidence_artifact=evidence_artifact.to_dict(),
-            relations_artifact=relations_artifact.to_dict(),
+            evidence_artifact=evidence_context,
+            relations_artifact=relations_context,
         )
         quality_artifact = self._write_json(run_dir / "quality_gates.json", quality_payload, kind="quality_gates")
         report_text = report or render_trace_report(
@@ -296,6 +298,51 @@ def _empty_agent_reasoning() -> dict[str, Any]:
         "unverified_claims": [],
         "validation_steps": [],
         "open_questions": [],
+    }
+
+
+def _evidence_artifact_context(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"record_count": 0, "evidence_ids": [], "source_ids": [], "read_error": f"missing artifact: {path}"}
+    evidence_ids: list[str] = []
+    source_ids: list[str] = []
+    record_count = 0
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            for line_number, line in enumerate(file, start=1):
+                if not line.strip():
+                    continue
+                payload = json.loads(line)
+                record_count += 1
+                evidence_id = str(payload.get("evidence_id") or "").strip()
+                source_id = str(payload.get("source_id") or "").strip()
+                if evidence_id:
+                    evidence_ids.append(evidence_id)
+                if source_id:
+                    source_ids.append(source_id)
+    except (OSError, TypeError, ValueError) as error:
+        return {"record_count": record_count, "evidence_ids": evidence_ids, "source_ids": source_ids, "read_error": f"{path}: {error}"}
+    return {
+        "record_count": record_count,
+        "evidence_ids": sorted(set(evidence_ids)),
+        "source_ids": sorted(set(source_ids)),
+    }
+
+
+def _relations_artifact_context(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"record_count": 0, "relation_ids": [], "read_error": f"missing artifact: {path}"}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError) as error:
+        return {"record_count": 0, "relation_ids": [], "read_error": f"{path}: {error}"}
+    records = payload.get("records") if isinstance(payload, dict) else []
+    if not isinstance(records, list):
+        return {"record_count": 0, "relation_ids": [], "read_error": f"{path}: records must be a list"}
+    relation_ids = sorted({str(record.get("id") or "").strip() for record in records if isinstance(record, dict) and record.get("id")})
+    return {
+        "record_count": len(records),
+        "relation_ids": relation_ids,
     }
 
 

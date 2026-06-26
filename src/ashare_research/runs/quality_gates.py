@@ -134,12 +134,24 @@ def _source_gate(
     if missing:
         return _gate("warning", f"source artifacts missing: {missing}")
 
+    artifact_errors = _artifact_read_errors(evidence_artifact, relations_artifact)
+    if artifact_errors:
+        return _gate("blocked", "source artifacts could not be inspected", {"items": artifact_errors})
+
     unsupported_exposure = _unsupported_company_exposure(output)
     if unsupported_exposure:
         return _gate(
             "blocked",
             "company exposure claims require mart, evidence, or traceable relations support",
             {"items": unsupported_exposure},
+        )
+
+    missing_refs = _missing_artifact_refs(output, evidence_artifact, relations_artifact)
+    if missing_refs:
+        return _gate(
+            "blocked",
+            "validated output references evidence or relations not present in run artifacts",
+            {"items": missing_refs},
         )
     return _gate("passed", "")
 
@@ -259,6 +271,94 @@ def _is_strong_exposure_ref(ref: dict[str, Any]) -> bool:
 
 def _source_kinds(value: Any) -> list[str]:
     return sorted({str(item.get("source_kind") or "") for item in _list_of_dicts(value) if item.get("source_kind")})
+
+
+def _artifact_read_errors(*artifacts: dict[str, Any] | None) -> list[dict[str, Any]]:
+    return [
+        {"kind": artifact.get("kind"), "path": artifact.get("path"), "error": artifact.get("read_error")}
+        for artifact in artifacts
+        if artifact and artifact.get("read_error")
+    ]
+
+
+def _missing_artifact_refs(
+    output: dict[str, Any] | None,
+    evidence_artifact: dict[str, Any],
+    relations_artifact: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if output is None:
+        return []
+    evidence_ids = {str(value) for value in evidence_artifact.get("evidence_ids", []) if value}
+    evidence_source_ids = {str(value) for value in evidence_artifact.get("source_ids", []) if value}
+    relation_ids = {str(value) for value in relations_artifact.get("relation_ids", []) if value}
+    missing: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for ref in _walk_dicts(output):
+        source_kind = str(ref.get("source_kind") or "").lower()
+        if source_kind == "evidence":
+            evidence_id = str(ref.get("evidence_id") or "").strip()
+            source_id = str(ref.get("source_id") or "").strip()
+            if evidence_id:
+                if evidence_id not in evidence_ids:
+                    _append_missing_ref(
+                        missing,
+                        seen,
+                        source_kind="evidence",
+                        source=_source_ref_label(ref),
+                        reason=f"evidence_id not found in evidence artifact: {evidence_id}",
+                    )
+            elif source_id:
+                if source_id not in evidence_ids and source_id not in evidence_source_ids:
+                    _append_missing_ref(
+                        missing,
+                        seen,
+                        source_kind="evidence",
+                        source=_source_ref_label(ref),
+                        reason=f"source_id not found in evidence artifact: {source_id}",
+                    )
+            else:
+                _append_missing_ref(
+                    missing,
+                    seen,
+                    source_kind="evidence",
+                    source=_source_ref_label(ref),
+                    reason="evidence reference requires evidence_id or source_id",
+                )
+        elif source_kind == "relations":
+            relation_id = str(ref.get("relation_id") or ref.get("source_id") or "").strip()
+            if not relation_id:
+                _append_missing_ref(
+                    missing,
+                    seen,
+                    source_kind="relations",
+                    source=_source_ref_label(ref),
+                    reason="relations reference requires relation_id or source_id",
+                )
+            elif relation_id not in relation_ids:
+                _append_missing_ref(
+                    missing,
+                    seen,
+                    source_kind="relations",
+                    source=_source_ref_label(ref),
+                    reason=f"relation id not found in relations artifact: {relation_id}",
+                )
+    return missing
+
+
+def _append_missing_ref(
+    output: list[dict[str, Any]],
+    seen: set[tuple[str, str, str]],
+    *,
+    source_kind: str,
+    source: str,
+    reason: str,
+) -> None:
+    key = (source_kind, source, reason)
+    if key in seen:
+        return
+    seen.add(key)
+    output.append({"source_kind": source_kind, "source": source, "reason": reason})
 
 
 def _has_source_reference(ref: dict[str, Any]) -> bool:

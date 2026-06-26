@@ -15,8 +15,9 @@ def default_data_dir() -> Path:
     return project_root() / "data"
 
 
-def default_runs_dir() -> Path:
+def default_runs_dir(data_dir: Path | str | None = None) -> Path:
     configured = os.environ.get("ASHARE_RUNS_DIR")
     if configured:
         return Path(configured).expanduser()
-    return project_root() / "runs"
+    base_dir = Path(data_dir) if data_dir is not None else default_data_dir()
+    return base_dir / "runs"

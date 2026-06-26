@@ -21,9 +21,9 @@ description: Use when an LLM agent researches A-share market themes, stock candi
 
 ## 交易模式输入
 
-用户可能用自然语言描述任意交易模式，例如价投、中短线、产业主线、龙头、事件驱动或混合模式。不要假设项目已内置这些模式。
+用户可能用自然语言描述任意交易模式，例如价投、中短线、产业主线、龙头、事件驱动或混合模式。不要把交易模式当固定流程，也不要临场复述交易动作。
 
-处理这类输入时，只在当前研究中临时归一化为：
+若用户指定已沉淀提示词，先读对应文件；否则只在当前研究中临时归一化为：
 
 - 主要矛盾；
 - 优先读取的数据；
@@ -32,6 +32,10 @@ description: Use when an LLM agent researches A-share market themes, stock candi
 - 失效条件和输出边界。
 
 归一化结果用于指导当次研究的数据选择、证据判断和输出边界。
+
+当前已沉淀的研究提示词：
+
+- `references/prompts/industry-chain-trend.md`：产业主线扩散研究，用于强产业周期、结构性行情、产业链上中下游拆解、辐射行业和公司映射。
 
 ## 补证和产业链梳理
 
@@ -46,7 +50,9 @@ description: Use when an LLM agent researches A-share market themes, stock candi
 - 支撑的具体 claim；
 - 证据强弱和不确定性。
 
-产业链研究要先梳理上游、中游、下游、设备、材料、零部件、应用等节点，再把公司映射到节点。公司映射应能落到“节点 -> 公司 -> 证据 -> 强弱 -> 缺口”。凡是当次分析形成的可复用产业链节点、产品暴露、上下游、客户或供应关系，Codex 应直接用 `relations ingest` 落到 relations。当次结论必须同时给出来源、日期和证据强弱。
+补到可审计来源且用于支撑关键结论时，Codex 应先用 `evidence validate` 检查，再用 `evidence ingest` 入库，并在结论中引用返回的 `evidence_id`。
+
+产业链研究要先梳理上游、中游、下游、设备、材料、零部件、应用等节点，再把公司映射到节点。公司映射应能落到“节点 -> 公司 -> 证据 -> 强弱 -> 缺口”。凡是当次分析形成的可复用产业链节点、产品暴露、上下游、客户或供应关系，Codex 应直接用 `relations ingest` 落到 relations，并在结论中引用 relation `id`。当次结论必须同时给出来源、日期和证据强弱。
 
 候选池必须先从本地 feature / mart 的市场线索生成，再补公司证据。手写的已知公司名单只能作为先验观察单独标注，不能混进主筛选排序。没有可审计公司证据的公司，不应进入重点研究，只能列为市场线索或证据待补。
 
@@ -58,7 +64,7 @@ description: Use when an LLM agent researches A-share market themes, stock candi
 | feature | `data/features/` | 可复现筛查、排序、聚合信号 | 不能单独当事实结论 |
 | evidence | `data/evidence/` | 产业价格、订单、产能、capex、政策、招投标等外部证据 | 补 mart 覆盖不了的事实 |
 | relations | `data/relations/` | 公司、产品、客户、产业链节点和关系 | 慢变量关系库；每条记录必须带来源或推理依据、置信度和有效期 |
-| runs / reports | `runs/`、`reports/` | 研究留痕和展示 | 不是事实源 |
+| runs / reports | `data/runs/`、`data/reports/` | 研究留痕和展示 | 不是事实源 |
 
 ## 研究纪律
 
@@ -81,9 +87,11 @@ uv run ashare mart meta DATASET --trade-date YYYYMMDD
 uv run ashare feature meta FEATURE --as-of YYYYMMDD --window 20
 uv run ashare feature read FEATURE --as-of YYYYMMDD --window 20 --columns COLS --sort SCORE --limit 30 --format json
 uv run ashare evidence search --industry INDUSTRY --format json
+uv run ashare evidence validate evidence.json
+uv run ashare evidence ingest evidence.json
 uv run ashare relations search --entity ENTITY --format json
 uv run ashare relations ingest relations.json
-uv run ashare runs record --question "..." --as-of YYYYMMDD
+uv run ashare runs record --question "..." --as-of YYYYMMDD --validated-output model_output.validated.json
 ```
 
 默认不要新增“按问题生成研究报告”的命令。LLM 应直接读取数据和证据，自行推理。
