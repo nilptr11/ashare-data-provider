@@ -39,6 +39,7 @@ from research_data_foundation.sources import (
     CninfoSourceAdapter,
     EastmoneySourceAdapter,
     SecEdgarSourceAdapter,
+    TencentGlobalQuoteAdapter,
     TencentQuoteAdapter,
     TushareSourceAdapter,
 )
@@ -144,6 +145,10 @@ def test_default_registry_models_first_phase_boundaries():
     assert sec_companyfacts.temporal.temporal_mode == "filing"
     assert sec_companyfacts.permits("financial_analysis")
     assert not sec_companyfacts.permits("candidate_generation")
+
+    global_tencent_quote = registry.require_source("global_tencent_quote")
+    assert global_tencent_quote.source_role == "cross_market_reference"
+    assert global_tencent_quote.authority_tier == "S3"
 
     report_index = registry.require_dataset("industry.eastmoney_report_index")
     assert report_index.role == "evidence_seed"
@@ -2079,6 +2084,61 @@ def test_rdf_cli_fetches_current_quote_context(monkeypatch, capsys, tmp_path):
     assert payload["current_quote"]["finality"] == "provisional"
     assert "candidate_generation" in payload["current_quote"]["forbidden_uses"]
     assert payload["current_quote"]["records"][0]["price"] == 10.3
+
+
+def test_rdf_cli_fetches_global_current_quote_context(monkeypatch, capsys):
+    import importlib
+
+    cli_module = importlib.import_module("research_data_foundation.cli.main")
+
+    class FakeTencentGlobalQuoteAdapter:
+        def fetch(self, api_name, params, fields=None):
+            assert api_name == "qt.global_quote_snapshot"
+            assert params == {"tickers": "AAPL,00700.HK"}
+            return SourceFetchResult(
+                source_id="global_tencent_quote",
+                api_name=api_name,
+                params=params,
+                requested_at="2026-06-27T10:00:00+08:00",
+                frame=pd.DataFrame(
+                    [
+                        {
+                            "symbol": "AAPL",
+                            "market": "us",
+                            "code": "AAPL.OQ",
+                            "name": "Apple Inc.",
+                            "local_name": "苹果",
+                            "snapshot_at": "2026-06-27T10:00:00+08:00",
+                            "quote_time": "2026-06-26 16:00:02",
+                            "price": 283.78,
+                            "pct_chg": 3.14,
+                            "change": 8.63,
+                            "open": 275.0,
+                            "high": 285.95,
+                            "low": 274.21,
+                            "prev_close": 275.15,
+                            "volume": 261775450.0,
+                            "amount": 73812444088.0,
+                            "currency": "USD",
+                            "quote_source": "global_tencent_quote",
+                            "source_url": "https://qt.gtimg.cn/?q=usAAPL",
+                        }
+                    ]
+                ),
+            )
+
+    monkeypatch.setattr(cli_module, "TencentGlobalQuoteAdapter", FakeTencentGlobalQuoteAdapter)
+
+    exit_code = cli_module.main(["global", "quotes", "current", "--symbol", "AAPL", "--symbol", "00700.HK"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema"] == "rdf.global_current_quote.v1"
+    assert payload["source"] == "global_tencent_quote"
+    assert payload["current_quote"]["finality"] == "provisional"
+    assert "ashare_primary_candidate_generation" in payload["current_quote"]["forbidden_uses"]
+    assert payload["current_quote"]["records"][0]["symbol"] == "AAPL"
+    assert payload["current_quote"]["records"][0]["currency"] == "USD"
 
 
 def test_feature_builder_builds_ashare_daily_momentum_from_canonical_daily(tmp_path):
@@ -4500,6 +4560,43 @@ def test_tencent_quote_adapter_fetches_current_quote_snapshot():
     assert row["pct_chg"] == -1.82
     assert row["amount"] == 1270902948.0
     assert row["quote_time"] == "2026-06-26T16:14:57+08:00"
+
+
+def test_tencent_global_quote_adapter_fetches_us_and_hk_quotes():
+    calls = []
+
+    def fake_transport(url, params, headers, timeout):
+        calls.append({"url": url, "params": params, "headers": headers})
+        text = (
+            'v_usAAPL="200~苹果~AAPL.OQ~283.78~275.15~275.00~261775450~0~0~282.51~160~0~0~0~0~0~0~0~0~'
+            '282.59~40~0~0~0~0~0~0~0~0~~2026-06-26 16:00:02~8.63~3.14~285.95~274.21~USD~'
+            '261775450~73812444088~1.78~34.36~~38.04~~4.27~41654.03683~41679.77886~Apple Inc.~~~";'
+            'v_r_hk00700="100~腾讯控股~00700~411.800~421.400~418.000~31872909.0~0~0~411.800~0~0~0~0~0~0~0~0~0~'
+            '411.800~0~0~0~0~0~0~0~0~0~31872909.0~2026/06/26 16:08:15~-9.600~-2.28~421.200~411.000~'
+            '411.800~31872909.0~13190958463.852~0~15.07~~0~0~2.42~37507.5384~37507.5384~TENCENT~'
+            '1.29~677.700~411.000~0.91~67.86~0~0~0~0~0~14.09~2.97~0.35~100~-30.64~-6.45~GP~'
+            '20.59~11.53~-9.93~-3.11~-16.01~9108192913.00~9108192913.00~14.25~5.306~413.861~-35.53~HKD~1~50";'
+        )
+        return HttpResponse(status=200, url=f"{url}?q={params['q']}", text=text, headers={})
+
+    response = TencentGlobalQuoteAdapter(transport=fake_transport).fetch(
+        "qt.global_quote_snapshot",
+        {"tickers": "AAPL,00700.HK", "snapshot_at": "2026-06-27T10:30:00+08:00"},
+    )
+
+    assert response.source_id == "global_tencent_quote"
+    assert response.api_name == "qt.global_quote_snapshot"
+    assert calls[0]["params"] == {"q": "usAAPL,r_hk00700"}
+    assert calls[0]["headers"]["Referer"] == "https://gu.qq.com/"
+    records = {row["symbol"]: row for row in response.frame.to_dict(orient="records")}
+    assert records["AAPL"]["market"] == "us"
+    assert records["AAPL"]["name"] == "Apple Inc."
+    assert records["AAPL"]["price"] == 283.78
+    assert records["AAPL"]["currency"] == "USD"
+    assert records["00700.HK"]["market"] == "hk"
+    assert records["00700.HK"]["name"] == "TENCENT"
+    assert records["00700.HK"]["pct_chg"] == -2.28
+    assert records["00700.HK"]["currency"] == "HKD"
 
 
 def test_cninfo_source_adapter_fetches_announcement_index():

@@ -95,6 +95,7 @@ uv run rdf datasets meta DATASET_ID --partition key=value
 uv run rdf datasets read DATASET_ID --partition key=value --limit 30
 uv run rdf datasets read-window DATASET_ID --as-of YYYYMMDD --count 20 --limit 100
 uv run rdf quotes current --security-id 000001.SZ
+uv run rdf global quotes current --symbol AAPL
 uv run rdf features read FEATURE_ID --as-of YYYYMMDD --window 20 --limit 30
 uv run rdf announcements discover --start-date YYYYMMDD --end-date YYYYMMDD --security-id 000001.SZ --keyword 关键词 --limit 20
 uv run rdf announcements fetch-text --publish-date YYYYMMDD --announcement-id ANNOUNCEMENT_ID --source-url SOURCE_URL --security-id 000001.SZ

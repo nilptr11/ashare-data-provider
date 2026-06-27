@@ -6,6 +6,16 @@ from ...core import DatasetContract, IngestionRecipe, LineagePolicy, PipelineSpe
 def global_reference_sources() -> tuple[SourceSpec, ...]:
     return (
         SourceSpec(
+            id="global_tencent_quote",
+            title="Tencent US/HK current quote snapshot",
+            source_role="cross_market_reference",
+            authority_tier="S3",
+            transport="http",
+            rate_limit={"concurrency": 1, "min_interval_seconds": 1.0},
+            auth={"type": "none"},
+            notes="On-demand US/HK quote source for cross-market context only. Never generates A-share candidates or overwrites local A-share EOD facts.",
+        ),
+        SourceSpec(
             id="sec_edgar",
             title="SEC EDGAR",
             source_role="cross_market_reference",

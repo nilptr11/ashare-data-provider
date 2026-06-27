@@ -21,6 +21,7 @@ uv run rdf inventory plan --as-of YYYYMMDD
 uv run rdf inventory plan --as-of YYYYMMDD --coverage-status partial --no-features
 uv run rdf sources list --as-of YYYYMMDD --limit-datasets 5
 uv run rdf sources show SOURCE_ID --as-of YYYYMMDD --limit-datasets 10
+uv run rdf sources show global_tencent_quote --as-of YYYYMMDD
 uv run rdf registry list datasets
 uv run rdf datasets list --domain ashare_core
 uv run rdf datasets list --domain ashare_enrichment
@@ -30,6 +31,7 @@ uv run rdf datasets search 关键词 --as-of YYYYMMDD
 uv run rdf datasets search 关键词 --as-of YYYYMMDD --use market_validation
 uv run rdf datasets search 公告 --as-of YYYYMMDD --use evidence
 uv run rdf quotes current --security-id 000001.SZ
+uv run rdf global quotes current --symbol AAPL
 ```
 
 `coverage.status` 的含义：
@@ -131,6 +133,17 @@ uv run rdf quotes current --security-id 000001.SZ --source eastmoney
 
 `quotes current` 只读取当次需要的当前 quote，并返回 `canonical_eod` 最新 final 分区上下文。它是 provisional 观察，不更新 `ashare.daily`；需要把盘中观察留到 mart 时，再用 `ashare.intraday_snapshot` ingest。
 
+## 跨市场参考
+
+```bash
+uv run rdf global quotes current --symbol AAPL
+uv run rdf global quotes current --symbol 00700.HK
+uv run rdf global quotes current --symbol AAPL --symbol 00700.HK
+uv run rdf sources show global_tencent_quote --as-of YYYYMMDD
+```
+
+`global quotes current` 是港美股 current quote on-demand 入口，只用于 overseas peer / cross-market context，不生成 A 股主候选，不证明 A 股公司业务暴露。
+
 ## 非 Tushare 按需来源
 
 CNINFO 公告：
@@ -154,6 +167,7 @@ uv run rdf ingest dataset ashare.intraday_snapshot --recipe eastmoney.push2.quot
 SEC 跨市场参考：
 
 ```bash
+uv run rdf global quotes current --symbol AAPL --symbol 00700.HK
 uv run rdf ingest pipeline global_reference_universe_weekly --partition snapshot_date=YYYYMMDD --refresh
 uv run rdf ingest pipeline global_reference_weekly --partition cik=0000320193 --refresh
 uv run rdf ingest pipeline global_reference_companyfacts_on_demand --partition cik=0000320193 --refresh

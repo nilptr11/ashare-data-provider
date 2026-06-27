@@ -34,6 +34,7 @@
 | Eastmoney Direct | `src/research_data_foundation/sources/eastmoney.py` | 行业研报索引和部分东财独有公开数据 | S3/S4 线索来源；`industry-report-index` 按 `query_date` 限定结束日期，研报索引不能证明公司业务暴露 |
 | Eastmoney Intraday | `src/research_data_foundation/sources/eastmoney.py` | A 股盘中行情 snapshot | provisional 观察源，不能覆盖 Tushare EOD |
 | Tencent Quote | `src/research_data_foundation/sources/tencent.py`, `rdf quotes current` | A 股当前行情按需观察 | S3 provisional 来源；优先用于今日未收盘或 Tushare EOD 未更新时的当前 quote，不写入 `ashare.daily`，不能单独生成主候选 |
+| Tencent US/HK Quote | `src/research_data_foundation/sources/tencent_global.py`, `rdf global quotes current` | 港美股当前行情按需观察、海外同业和跨市场背景 | S3 provisional 来源；只做 cross-market context / validation，不进入 A 股主候选池 |
 | 通用 HTTP | `src/research_data_foundation/sources/http.py` | 后续政策、协会、公告、价格和招投标来源的 transport | 优先登记获取方法和字段语义；需要长期本地化时再声明 SourceSpec、DatasetContract 和 IngestionRecipe |
 | 可复用 evidence source | `data/evidence/sources/*.json`, `rdf evidence sources` | 官方统计、协会、价格指数、招投标等结构稳定 HTTP JSON 补证入口 | 默认先作为获取说明；只有当次研究用到的结果才 fetch 并进入 evidence，不能替代 mart 或官方公告正文 claim |
 | 待迁移：CNINFO / 交易所 / 招投标 | `references/refactor-plan.md` | 公司公告、订单、项目、中标、客户线索 | 应进入 evidence 或 mart；公司事实优先使用 S1 来源 |

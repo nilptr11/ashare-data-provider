@@ -2,7 +2,7 @@
 
 给 LLM / Codex 使用的 A 股研究数据底座。当前内核是 `research_data_foundation`，以 A 股 canonical EOD 为主域，同时提供跨市场参考和外部证据的按需获取入口。
 
-本项目不做 Agent runtime、API 服务、自动化交易系统、固定投研工作流或外部数据湖。它只长期维护高复用、稳定、结构明确、时效语义清楚的本地事实层；网页、公告 PDF、招投标、政策、协会和外部 API 默认只登记获取方法，只有被研究结论使用的具体 claim 才进入 evidence，被分析确认的慢变量关系才进入 relations。
+本项目不做 Agent runtime、API 服务、自动化交易系统、固定投研工作流或外部数据湖。它只长期维护高复用、稳定、结构明确、时效语义清楚的本地事实层；网页、公告 PDF、招投标、政策、协会和外部 API 默认只登记获取方法，只有被研究结论使用的具体 claim 才进入 evidence，被分析确认的慢变量关系才进入 relations。港美股等其他市场只作为跨市场 reference/context，不进入 A 股主候选池。
 
 ## 核心取舍
 
@@ -102,6 +102,7 @@ uv run rdf datasets meta DATASET_ID --partition key=value
 uv run rdf datasets read DATASET_ID --partition key=value --limit 30
 uv run rdf datasets read-window DATASET_ID --as-of YYYYMMDD --count 20 --limit 100
 uv run rdf quotes current --security-id 000001.SZ
+uv run rdf global quotes current --symbol AAPL --symbol 00700.HK
 uv run rdf features read FEATURE_ID --as-of YYYYMMDD --window 20 --limit 30
 ```
 
@@ -135,6 +136,8 @@ uv run rdf evidence from-announcement-text --partition publish_date=YYYYMMDD --p
 公司研究结论不能把 `partial/latest_before/latest` 当成目标日全量事实。`rdf datasets read-window` 对交易日分区表示近 N 个已入库交易日，不是自然日。`--lookback-trading-days` 也是交易日数量，不是自然日数量。
 
 今日未收盘或 Tushare EOD 未更新时，用 `rdf quotes current` 读取 current quote。该结果是 `provisional` 观察，只能用于当前市场状态和异动验证，不能覆盖 `ashare.daily`，不能单独生成主候选。
+
+需要海外同业或港美股背景时，用 `rdf global quotes current` 和 `global.sec_*`。这些数据只做 cross-market context / validation，不能生成 A 股主候选，也不能证明 A 股公司业务暴露。
 
 ## 非目标
 

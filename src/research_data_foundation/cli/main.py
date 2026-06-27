@@ -40,7 +40,7 @@ from ..maintenance import (
 )
 from ..relations import ENTITY_TYPES, PREDICATES, RelationProfiler, RelationRecord, RelationStore, validate_relation
 from ..runs import RunRecorder, replay_run
-from ..sources import CninfoSourceAdapter, EastmoneySourceAdapter, SourceAdapterError, TencentQuoteAdapter
+from ..sources import CninfoSourceAdapter, EastmoneySourceAdapter, SourceAdapterError, TencentGlobalQuoteAdapter, TencentQuoteAdapter
 from ..storage import MartStore
 
 
@@ -110,6 +110,14 @@ def main(argv: list[str] | None = None) -> int:
             payload = current_quote_payload(
                 MartStore(args.data_dir, registry),
                 security_ids=tuple(args.security_id),
+                source=args.source,
+            )
+            print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+            return 0
+    if args.command == "global":
+        if args.global_command == "quotes" and args.global_quotes_command == "current":
+            payload = global_current_quote_payload(
+                symbols=tuple(args.symbol),
                 source=args.source,
             )
             print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
@@ -786,6 +794,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Quote source. auto tries Tencent first, then Eastmoney.",
     )
 
+    global_ref = subparsers.add_parser("global", help="Fetch cross-market reference context without A-share candidate generation")
+    global_subparsers = global_ref.add_subparsers(dest="global_command", required=True)
+    global_quotes = global_subparsers.add_parser("quotes", help="Fetch US/HK quote context")
+    global_quotes_subparsers = global_quotes.add_subparsers(dest="global_quotes_command", required=True)
+    global_quotes_current = global_quotes_subparsers.add_parser("current", help="Fetch provisional current US/HK quotes")
+    global_quotes_current.add_argument("--symbol", action="append", required=True, help="US ticker or HK ticker, e.g. AAPL or 00700.HK. Repeatable.")
+    global_quotes_current.add_argument(
+        "--source",
+        choices=("auto", "tencent", "global_tencent_quote"),
+        default="auto",
+        help="Quote source. auto currently uses Tencent US/HK quote.",
+    )
+
     announcements = subparsers.add_parser("announcements", help="Discover and fetch official announcements on demand")
     announcements_subparsers = announcements.add_subparsers(dest="announcements_command", required=True)
     announcements_discover = announcements_subparsers.add_parser("discover", help="Query CNINFO remotely for announcement candidates without writing local mart data")
@@ -1198,6 +1219,65 @@ def current_quote_payload(
             "Current quotes are provisional observations. Use them to understand the current market state before "
             "Tushare EOD is available, but do not overwrite ashare.daily or use them alone for primary candidates."
         ),
+    }
+
+
+def global_current_quote_payload(
+    *,
+    symbols: tuple[str, ...],
+    source: str,
+) -> dict[str, Any]:
+    source_id = "global_tencent_quote" if source in {"auto", "tencent"} else source
+    if source_id != "global_tencent_quote":
+        raise SystemExit(f"unsupported global quote source: {source}")
+    try:
+        result = TencentGlobalQuoteAdapter().fetch(
+            "qt.global_quote_snapshot",
+            {"tickers": ",".join(symbols)},
+        )
+    except SourceAdapterError as error:
+        raise SystemExit(str(error)) from error
+    records = [normalize_global_quote_record(row) for row in result.frame.to_dict(orient="records")]
+    return {
+        "schema": "rdf.global_current_quote.v1",
+        "status": "ready" if records else "empty",
+        "requested_symbols": list(symbols),
+        "source": source_id,
+        "current_quote": {
+            "finality": "provisional",
+            "available_after": "realtime",
+            "allowed_uses": ["cross_market_context", "cross_market_validation", "market_context"],
+            "forbidden_uses": ["candidate_generation", "ashare_primary_candidate_generation", "company_business_exposure", "trade_execution"],
+            "records": records,
+        },
+        "boundary": (
+            "Global quotes are cross-market provisional observations. Use them for overseas peer or HK/US market context; "
+            "never generate A-share primary candidates or company exposure conclusions from them alone."
+        ),
+    }
+
+
+def normalize_global_quote_record(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "symbol": str(row.get("symbol") or ""),
+        "market": str(row.get("market") or ""),
+        "code": str(row.get("code") or ""),
+        "name": str(row.get("name") or ""),
+        "local_name": str(row.get("local_name") or ""),
+        "snapshot_at": str(row.get("snapshot_at") or ""),
+        "quote_time": str(row.get("quote_time") or ""),
+        "price": row.get("price"),
+        "pct_chg": row.get("pct_chg"),
+        "change": row.get("change"),
+        "open": row.get("open"),
+        "high": row.get("high"),
+        "low": row.get("low"),
+        "prev_close": row.get("prev_close"),
+        "volume": row.get("volume"),
+        "amount": row.get("amount"),
+        "currency": str(row.get("currency") or ""),
+        "quote_source": str(row.get("quote_source") or "global_tencent_quote"),
+        "source_url": str(row.get("source_url") or ""),
     }
 
 

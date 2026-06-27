@@ -21,7 +21,7 @@
 | 招投标和采购 | 本地无默认全量库 | 需要订单或需求验证 | 中国招标投标公共服务平台、政府采购、央企/地方采购平台 | 中标/采购 claim 进 evidence；客户/供应关系需审核后进 relations |
 | 政策催化 | 本地无默认全量库 | 主题依赖政策或监管变化 | 部委、地方政府、交易所、监管机构公告 | 政策 claim 进 evidence；不得只引用媒体解读 |
 | 盘中异动验证 | `rdf quotes current`、`ashare.intraday_snapshot` | Tushare EOD 未更新或用户问盘中 | Tencent current quote；Eastmoney intraday fallback | current quote 只作 provisional 观察；需要留痕时才进 `ashare.intraday_snapshot`，不能覆盖 canonical EOD |
-| 海外同业和跨市场参考 | `global.sec_*` | 需要海外公司事实、估值、走势 | SEC EDGAR；后续 Yahoo / Eastmoney global | `global_reference` 或 evidence/context；不进 A 股主候选 |
+| 海外同业和跨市场参考 | `global.sec_*`、`rdf global quotes current` | 需要海外公司事实、港美股当前表现、估值、走势 | SEC EDGAR；Tencent US/HK quote；后续 Yahoo / Eastmoney global | `global_reference` 或 evidence/context；不进 A 股主候选 |
 | 主题或公司线索搜索 | 本地 feature/mart | 本地无法覆盖外部叙事 | 东财研报/新闻；iwencai 可选 | 只作线索，不能直接支撑高置信公司结论 |
 
 ## 已接入来源
@@ -67,12 +67,13 @@ uv run rdf ingest dataset ashare.intraday_snapshot --recipe eastmoney.push2.quot
 用途：海外公司 filing、ticker-CIK、XBRL companyfacts、跨市场参考。
 
 ```bash
+uv run rdf global quotes current --symbol AAPL --symbol 00700.HK
 uv run rdf ingest pipeline global_reference_universe_weekly --partition snapshot_date=YYYYMMDD --refresh
 uv run rdf ingest pipeline global_reference_weekly --partition cik=0000320193 --refresh
 uv run rdf ingest pipeline global_reference_companyfacts_on_demand --partition cik=0000320193 --refresh
 ```
 
-边界：只能做跨市场背景、同业验证、客户/供应链参考和 evidence/context，不能生成 A 股主候选。
+边界：`global quotes current` 是港美股 provisional quote，只做跨市场当前背景；SEC EDGAR 是 S1 官方海外披露来源。二者只能做同业验证、客户/供应链参考和 evidence/context，不能生成 A 股主候选。
 
 ## 待沉淀来源
 

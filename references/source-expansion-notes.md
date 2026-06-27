@@ -45,6 +45,7 @@
 可吸收方向：
 
 - SEC EDGAR submissions / CIK mapping / XBRL：已落 `sec_edgar` -> `global.sec_filings`、`global.sec_ticker_cik`、`global.sec_companyfacts`；三者只做跨市场 reference、evidence 或 context。
+- 腾讯 US/HK quote：已落 `global_tencent_quote` -> `rdf global quotes current`，作为港美股当前行情按需观察；只做跨市场背景和同业验证，不进 A 股主候选。
 - Yahoo chart / quoteSummary：适合 `global_reference`，用于海外同业、估值、机构持仓和跨市场验证；不得直接生成 A 股主候选。
 - 东财全球 push2 / search / market list：适合构建海外市场 reference universe 和海外同业 momentum/context。
 - 港股/美股日线与资金流：可作为跨市场 reference feature，例如海外同业动量或资金背景。

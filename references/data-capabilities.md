@@ -15,6 +15,7 @@
 | canonical EOD | `ashare.daily`、`ashare.daily_basic`、`ashare.index_daily`、`ashare.sw_daily`、`ashare.ci_daily`、`ashare.dc_index` | Tushare 等收盘后接口 | `final` | 历史回看、候选池市场线索、feature 输入、收盘后复盘 | 不能证明公司业务暴露；未收盘时不能当作今日实时状态 |
 | current quote | `rdf quotes current` | Tencent current quote，fallback Eastmoney intraday | `provisional` | 今日未收盘或 Tushare EOD 未更新时，查看当前价格、涨跌幅、成交量和异动 | 不能覆盖 `ashare.daily`，不能单独生成主候选，不能做交易执行 |
 | intraday snapshot | `ashare.intraday_snapshot` | Eastmoney push2 等按需 snapshot | `provisional` | 需要把某次盘中观察留痕到 mart 时使用 | 不能覆盖 canonical EOD，不能作为公司事实 |
+| cross-market current quote | `rdf global quotes current` | Tencent US/HK quote | `provisional` | 海外同业、港美股风险偏好和跨市场背景验证 | 不能生成 A 股主候选，不能证明 A 股公司业务暴露 |
 | evidence | `data/evidence/`、`rdf evidence ...` | 公告、官方统计、协会、招投标等 | 由证据质量决定 | 支撑订单、客户、产能、价格、政策等具体 claim | 搜索命中、标题、热榜、概念标签不能当高置信 claim |
 | relations | `data/relations/`、`rdf relations ...` | Codex/人工分析确认后写入 | 慢变量 | 复用公司、产品、客户、产业链节点关系 | 不批量沉淀分类成分、热榜、资金流或未经分析的关系 |
 
@@ -52,6 +53,19 @@ uv run rdf ingest dataset ashare.intraday_snapshot --recipe eastmoney.push2.quot
 
 默认不要为了“以后可能会用”批量抓全市场盘中数据。
 
+## 跨市场参考读法
+
+当用户问题需要海外同业、港股映射、全球风险偏好或美股龙头当日表现时，使用跨市场 reference。它只能做背景和验证，不进入 A 股主候选池。
+
+```bash
+uv run rdf global quotes current --symbol AAPL
+uv run rdf global quotes current --symbol 00700.HK
+uv run rdf global quotes current --symbol AAPL --symbol 00700.HK
+uv run rdf datasets read global.sec_companyfacts --partition cik=0000320193 --limit 30
+```
+
+`global quotes current` 是 provisional quote；`global.sec_*` 是 SEC 官方 reference/financial facts。二者都不能替代 A 股本地 mart、公告 evidence 或 company relations。
+
 ## 数据能力索引
 
 | 用户要判断 | 优先入口 |
@@ -60,6 +74,7 @@ uv run rdf ingest dataset ashare.intraday_snapshot --recipe eastmoney.push2.quot
 | 某类数据在哪个 dataset | `uv run rdf datasets search 关键词 --as-of YYYYMMDD` |
 | 近 N 个交易日行情 | `uv run rdf datasets read-window ashare.daily --as-of YYYYMMDD --count N` |
 | 今日未收盘的当前行情 | `uv run rdf quotes current --security-id 000001.SZ` |
+| 海外同业或港美股当前背景 | `uv run rdf global quotes current --symbol AAPL --symbol 00700.HK` |
 | 市场强弱和板块线索 | `ashare.market_strength`、`ashare.industry_strength`、`ashare.concept_strength`、`ashare.limit_sentiment` |
 | 公司主营/财务事实 | `ashare.main_business`、`ashare_financials` 域，并回查公告正文 |
 | 订单、客户、产能、政策、产业价格 | CNINFO、官方统计、协会、招投标等 evidence source |
@@ -73,6 +88,7 @@ uv run rdf ingest dataset ashare.intraday_snapshot --recipe eastmoney.push2.quot
 - Tencent / Eastmoney：current quote 和 intraday provisional 观察；
 - CNINFO：公司披露和公告正文补证；
 - Eastmoney reportapi：研报索引和研究关注度；
+- Tencent US/HK quote 与 SEC EDGAR：跨市场 current quote、海外同业披露和财务 reference；
 - 其他高频稳定来源：先做 evidence source，确需长期结构化再升级为正式 dataset。
 
 Codex 使用这些能力时，应先选择“要证明什么”和“需要多新的数据”，再决定读取本地 mart、feature、evidence、relations，还是按需 fetch 外部来源。

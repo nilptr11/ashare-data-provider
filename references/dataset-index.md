@@ -53,6 +53,7 @@
 | 官方公告正文 | `ashare.announcement_text` | `publish_date=YYYYMMDD`, `announcement_id=ANNOUNCEMENT_ID` | 按需解析的 CNINFO PDF 正文、PDF 哈希、页数、解析状态 | 不能自动证明具体业务 claim；仍需摘录具体 claim |
 | 当前行情 | `rdf quotes current` | `--security-id 000001.SZ` | 今日未收盘或 Tushare EOD 未更新时读取当前价格、涨跌幅、成交额，并返回本地 EOD 最新分区上下文 | provisional 观察，不写入 `ashare.daily`，不能单独生成主候选或证明公司事实 |
 | A 股盘中快照 | `ashare.intraday_snapshot` | `snapshot_at=ISO_TIME` | 需要把一次盘中价格、涨跌幅、成交额观察留到 mart 时使用 | provisional 数据，不能覆盖 `ashare.daily`，不能生成主候选 |
+| 港美股当前行情 | `rdf global quotes current` | `--symbol AAPL`, `--symbol 00700.HK` | 海外同业、港股映射和跨市场当前背景 | provisional 观察；只做 cross-market context / validation，不能生成 A 股主候选 |
 | SEC filing 索引 | `global.sec_filings` | `cik=0000320193` | 海外公司披露、跨市场参考和 evidence context | 不直接生成 A 股主候选 |
 | SEC ticker-CIK 映射 | `global.sec_ticker_cik` | `snapshot_date=YYYYMMDD` | 海外证券、issuer 和 CIK 身份映射 reference fact | 不直接生成 A 股主候选；不替代 A 股证券身份 |
 | SEC companyfacts | `global.sec_companyfacts` | `cik=0000320193` | 海外公司 XBRL 财务事实、跨市场估值和 evidence seed | 不直接生成 A 股主候选；不证明 A 股公司业务暴露 |
@@ -93,6 +94,7 @@ uv run rdf datasets search 关键词 --as-of YYYYMMDD
 uv run rdf datasets meta DATASET_ID --partition key=value
 uv run rdf datasets read DATASET_ID --partition key=value --limit 30
 uv run rdf quotes current --security-id 000001.SZ
+uv run rdf global quotes current --symbol AAPL
 uv run rdf features read FEATURE_ID --as-of YYYYMMDD --window 20 --limit 30
 ```
 
