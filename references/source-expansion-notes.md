@@ -11,7 +11,7 @@
 可吸收方向：
 
 - 东财 reportapi 行业研报端点：已落为 `industry.eastmoney_report_index` 和 `industry.report_attention`；默认维护入口是 `rdf maintain industry-report-index --query-date YYYYMMDD --lookback-days 30 --max-pages 1 --refresh`，请求结束日期被限定为 `query_date`，避免 as-of 泄漏。
-- 东财 push2 / 腾讯 / mootdx 盘中行情经验：已先落 `eastmoney_intraday` -> `ashare.intraday_snapshot`；腾讯或 mootdx 可作为后续 intraday fallback。
+- 东财 push2 / 腾讯 / mootdx 盘中行情经验：已落 `rdf quotes current` 作为按需 current quote 入口，优先 Tencent、fallback Eastmoney；需要留痕时用 `eastmoney_intraday` -> `ashare.intraday_snapshot`。mootdx 暂不引入为运行依赖。
 - 巨潮公告动态 orgId、公告检索和 PDF metadata：已落为 CNINFO `official_disclosure` 按需发现和按需 PDF 正文取证；可选维护全市场索引，但默认不把每日全量公告作为研究前置。
 - 中信行业成员：已落为 `ashare.ci_industry_members`，与申万行业成员并列作为候选分组和分类交叉验证 mart；不得作为公司业务暴露度证据。
 - 申万行业层级：已落为 `ashare.sw_industry_classification`，从 Tushare `index_classify` 维护申万 2021 行业层级、行业代码和父级关系；用于行业树、分组和交叉验证，不得作为公司业务暴露证据，不默认进入 curated relations。

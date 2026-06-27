@@ -35,7 +35,13 @@ from research_data_foundation.maintenance import (
 from research_data_foundation.relations import RelationProfiler, RelationStore
 from research_data_foundation.relations.schemas import EntityRef, RelationRecord, RelationSource, validate_relation
 from research_data_foundation.runs import RunRecorder
-from research_data_foundation.sources import CninfoSourceAdapter, EastmoneySourceAdapter, SecEdgarSourceAdapter, TushareSourceAdapter
+from research_data_foundation.sources import (
+    CninfoSourceAdapter,
+    EastmoneySourceAdapter,
+    SecEdgarSourceAdapter,
+    TencentQuoteAdapter,
+    TushareSourceAdapter,
+)
 from research_data_foundation.sources.http import HttpBinaryResponse, HttpResponse
 from research_data_foundation.storage import MartStore, RawStore, SourceArtifact, SourceFetchResult, StagingStore, StorageError
 
@@ -150,6 +156,10 @@ def test_default_registry_models_first_phase_boundaries():
     assert intraday.temporal.finality == "provisional"
     assert intraday.permits("market_validation")
     assert not intraday.permits("candidate_generation")
+
+    tencent_quote = registry.require_source("tencent_quote")
+    assert tencent_quote.source_role == "intraday_observation"
+    assert tencent_quote.authority_tier == "S3"
 
     hsgt_top10 = registry.require_dataset("ashare.hsgt_top10")
     assert hsgt_top10.domain == "ashare_core"
@@ -1986,6 +1996,89 @@ def test_rdf_cli_target_shape_lists_sources_and_reads_datasets(capsys, tmp_path)
     assert read_payload["partition_meta"]["lineage"]["source_id"] == "tushare"
     assert read_payload["records"] == [{"close": 10.2, "security_id": "000001.SZ"}]
     assert "company business exposure" in read_payload["boundary"]
+
+
+def test_rdf_cli_fetches_current_quote_context(monkeypatch, capsys, tmp_path):
+    import importlib
+
+    cli_module = importlib.import_module("research_data_foundation.cli.main")
+
+    MartStore(tmp_path, default_registry()).publish(
+        "ashare.daily",
+        pd.DataFrame(
+            [
+                {
+                    "security_id": "000001.SZ",
+                    "trade_date": "20260626",
+                    "open": 10.0,
+                    "high": 10.5,
+                    "low": 9.8,
+                    "close": 10.2,
+                    "pct_chg": 2.0,
+                    "volume": 1000.0,
+                    "amount": 10000.0,
+                }
+            ]
+        ),
+        partition={"trade_date": "20260626"},
+        lineage={"source_id": "tushare"},
+    )
+
+    class FakeTencentQuoteAdapter:
+        def fetch(self, api_name, params, fields=None):
+            assert api_name == "qt.quote_snapshot"
+            assert params == {"security_ids": "000001.SZ"}
+            return SourceFetchResult(
+                source_id="tencent_quote",
+                api_name=api_name,
+                params=params,
+                requested_at="2026-06-27T10:00:00+08:00",
+                frame=pd.DataFrame(
+                    [
+                        {
+                            "security_id": "000001.SZ",
+                            "name": "平安银行",
+                            "snapshot_at": "2026-06-27T10:00:00+08:00",
+                            "quote_time": "2026-06-27T10:00:00+08:00",
+                            "price": 10.3,
+                            "pct_chg": 0.98,
+                            "change": 0.1,
+                            "open": 10.2,
+                            "high": 10.4,
+                            "low": 10.1,
+                            "prev_close": 10.2,
+                            "volume": 1000.0,
+                            "amount": 10000.0,
+                            "quote_source": "tencent_quote",
+                            "source_url": "https://qt.gtimg.cn/?q=sz000001",
+                        }
+                    ]
+                ),
+            )
+
+    monkeypatch.setattr(cli_module, "TencentQuoteAdapter", FakeTencentQuoteAdapter)
+
+    exit_code = cli_module.main(
+        [
+            "--data-dir",
+            str(tmp_path),
+            "quotes",
+            "current",
+            "--security-id",
+            "000001.SZ",
+            "--source",
+            "tencent",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema"] == "rdf.current_quote.v1"
+    assert payload["source"] == "tencent_quote"
+    assert payload["canonical_eod"]["latest_trade_date"] == "20260626"
+    assert payload["current_quote"]["finality"] == "provisional"
+    assert "candidate_generation" in payload["current_quote"]["forbidden_uses"]
+    assert payload["current_quote"]["records"][0]["price"] == 10.3
 
 
 def test_feature_builder_builds_ashare_daily_momentum_from_canonical_daily(tmp_path):
@@ -4376,6 +4469,37 @@ def test_eastmoney_source_adapter_fetches_intraday_snapshot():
     assert row["f12"] == "000001"
     assert row["snapshot_at"] == "2026-06-26T10:30:00+08:00"
     assert row["source_url"].startswith("https://push2.eastmoney.com/")
+
+
+def test_tencent_quote_adapter_fetches_current_quote_snapshot():
+    calls = []
+
+    def fake_transport(url, params, headers, timeout):
+        calls.append({"url": url, "params": params, "headers": headers})
+        text = (
+            'v_sz000001="51~平安银行~000001~10.23~10.42~10.42~1236482~480819~755663~'
+            '10.23~236~10.22~7029~10.21~6570~10.20~16561~10.19~6604~10.24~2867~'
+            '10.25~1783~10.26~1525~10.27~1022~10.28~2501~~20260626161457~'
+            '-0.19~-1.82~10.47~10.19~10.23/1236482/1270902948~1236482~127090~";'
+        )
+        return HttpResponse(status=200, url=f"{url}?q={params['q']}", text=text, headers={})
+
+    response = TencentQuoteAdapter(transport=fake_transport).fetch(
+        "qt.quote_snapshot",
+        {"security_ids": "000001.SZ", "snapshot_at": "2026-06-26T10:30:00+08:00"},
+    )
+
+    assert response.source_id == "tencent_quote"
+    assert response.api_name == "qt.quote_snapshot"
+    assert calls[0]["params"] == {"q": "sz000001"}
+    assert calls[0]["headers"]["Referer"] == "https://stockapp.finance.qq.com/"
+    row = response.frame.iloc[0].to_dict()
+    assert row["security_id"] == "000001.SZ"
+    assert row["name"] == "平安银行"
+    assert row["price"] == 10.23
+    assert row["pct_chg"] == -1.82
+    assert row["amount"] == 1270902948.0
+    assert row["quote_time"] == "2026-06-26T16:14:57+08:00"
 
 
 def test_cninfo_source_adapter_fetches_announcement_index():

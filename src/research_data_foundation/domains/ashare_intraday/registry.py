@@ -6,6 +6,16 @@ from ...core import DatasetContract, IngestionRecipe, LineagePolicy, PipelineSpe
 def ashare_intraday_sources() -> tuple[SourceSpec, ...]:
     return (
         SourceSpec(
+            id="tencent_quote",
+            title="Tencent A-share current quote snapshot",
+            source_role="intraday_observation",
+            authority_tier="S3",
+            transport="http",
+            rate_limit={"concurrency": 1, "min_interval_seconds": 1.0},
+            auth={"type": "none"},
+            notes="Lightweight on-demand A-share current quote source. Provisional only; never overwrites canonical EOD mart.",
+        ),
+        SourceSpec(
             id="eastmoney_intraday",
             title="Eastmoney intraday quote snapshot",
             source_role="intraday_observation",

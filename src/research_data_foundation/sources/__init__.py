@@ -3,6 +3,7 @@ from .cninfo import CninfoSourceAdapter
 from .eastmoney import EastmoneySourceAdapter
 from .registry import default_source_adapters
 from .sec_edgar import SecEdgarSourceAdapter
+from .tencent import TencentQuoteAdapter
 from .tushare import TushareSourceAdapter
 
 __all__ = [
@@ -11,6 +12,7 @@ __all__ = [
     "SecEdgarSourceAdapter",
     "SourceAdapter",
     "SourceAdapterError",
+    "TencentQuoteAdapter",
     "TushareSourceAdapter",
     "default_source_adapters",
 ]

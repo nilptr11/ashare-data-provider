@@ -2,9 +2,11 @@
 
 本文件是给 LLM agent 快速定位数据用的索引。它不是完整契约；完整注册项以 `uv run rdf datasets list`、`uv run rdf features list` 和 mart/feature meta 为准。
 
+完整 CLI 命令参考见 `references/cli-cookbook.md`。本文件只解决“该找哪个 dataset / feature”。
+
 ## 使用方式
 
-1. 先用 `references/data-map.md` 判断需要哪类事实。
+1. 先用 `references/data-capabilities.md` 判断需要多新的数据，再用 `references/data-map.md` 判断需要哪类事实。
 2. 不确定 dataset id 时，先用 `rdf datasets search 关键词 --as-of YYYYMMDD` 按研究意图搜索本地 mart 和契约。
 3. 在本索引中确认候选 dataset 或 feature 的用途边界。
 4. 用 `rdf datasets meta` / `rdf features meta` 确认分区日期、行数、输入和质量。
@@ -49,7 +51,8 @@
 | 财务披露事件 | `ashare.earnings_express`, `ashare.dividend`, `ashare.audit_opinion`, `ashare.disclosure_date`, `ashare.earnings_forecast` | `period=YYYYMMDD`, `security_id=000001.SZ` | 快报、分红、审计意见、披露日期、业绩预告 | 公告正文中的具体业务 claim |
 | 官方公告索引 | `ashare.announcements` | `publish_date=YYYYMMDD` | 可选维护的 CNINFO 披露入口、org_id、PDF metadata 和公告 evidence seed | 标题不能替代正文事实；org_id 只证明披露主体身份；不是研究默认前置 |
 | 官方公告正文 | `ashare.announcement_text` | `publish_date=YYYYMMDD`, `announcement_id=ANNOUNCEMENT_ID` | 按需解析的 CNINFO PDF 正文、PDF 哈希、页数、解析状态 | 不能自动证明具体业务 claim；仍需摘录具体 claim |
-| A 股盘中快照 | `ashare.intraday_snapshot` | `snapshot_at=ISO_TIME` | 盘中价格、涨跌幅、成交额临时观察 | provisional 数据，不能覆盖 `ashare.daily`，不能生成主候选 |
+| 当前行情 | `rdf quotes current` | `--security-id 000001.SZ` | 今日未收盘或 Tushare EOD 未更新时读取当前价格、涨跌幅、成交额，并返回本地 EOD 最新分区上下文 | provisional 观察，不写入 `ashare.daily`，不能单独生成主候选或证明公司事实 |
+| A 股盘中快照 | `ashare.intraday_snapshot` | `snapshot_at=ISO_TIME` | 需要把一次盘中价格、涨跌幅、成交额观察留到 mart 时使用 | provisional 数据，不能覆盖 `ashare.daily`，不能生成主候选 |
 | SEC filing 索引 | `global.sec_filings` | `cik=0000320193` | 海外公司披露、跨市场参考和 evidence context | 不直接生成 A 股主候选 |
 | SEC ticker-CIK 映射 | `global.sec_ticker_cik` | `snapshot_date=YYYYMMDD` | 海外证券、issuer 和 CIK 身份映射 reference fact | 不直接生成 A 股主候选；不替代 A 股证券身份 |
 | SEC companyfacts | `global.sec_companyfacts` | `cik=0000320193` | 海外公司 XBRL 财务事实、跨市场估值和 evidence seed | 不直接生成 A 股主候选；不证明 A 股公司业务暴露 |
@@ -81,111 +84,16 @@
 
 ## 最小确认命令
 
+本节只列常用核验命令；更多维护、补证和调试命令见 `references/cli-cookbook.md`。
+
 ```bash
 uv run rdf inventory summary --as-of YYYYMMDD
-uv run rdf inventory datasets --as-of YYYYMMDD --domain ashare_core
-uv run rdf inventory datasets --use company_business_exposure
 uv run rdf inventory plan --as-of YYYYMMDD
-uv run rdf inventory plan --as-of YYYYMMDD --coverage-status partial --no-features
-uv run rdf datasets search 资金流 --as-of YYYYMMDD --use market_validation
-uv run rdf datasets search 公告 --as-of YYYYMMDD --use evidence
-uv run rdf ingest recipe tushare.daily.to_ashare_daily --partition trade_date=YYYYMMDD --dry-run
-uv run rdf datasets meta ashare.daily --partition trade_date=YYYYMMDD
-uv run rdf maintain ashare-core --as-of YYYYMMDD --lookback-trading-days 60
-uv run rdf maintain status ashare-core --as-of YYYYMMDD --lookback-trading-days 60
-uv run rdf datasets meta ashare.intraday_snapshot --partition snapshot_at=ISO_TIME
-uv run rdf datasets read ashare.daily --partition trade_date=YYYYMMDD --limit 30
-uv run rdf datasets read ashare.price_limits --partition trade_date=YYYYMMDD --columns security_id up_limit down_limit --limit 30
-uv run rdf datasets read ashare.limit_list_ths --partition trade_date=YYYYMMDD --columns security_id name price pct_chg board_tag limit_reason open_num limit_order limit_amount --limit 30
-uv run rdf maintain ashare-index-weights --snapshot-date YYYYMMDD --refresh
-uv run rdf datasets read ashare.index_weights --partition snapshot_date=YYYYMMDD --columns index_id security_id weight_trade_date weight --limit 30
-uv run rdf datasets partitions ashare.daily --limit 10
-uv run rdf datasets latest ashare.daily --columns security_id trade_date close pct_chg --limit 100
-uv run rdf datasets read-window ashare.daily --as-of YYYYMMDD --count 20 --columns security_id trade_date close pct_chg --limit 100
-uv run rdf datasets read ashare.stock_basic --partition snapshot_date=YYYYMMDD --columns security_id symbol name fullname exchange list_date act_name act_ent_type --limit 30
-uv run rdf ingest pipeline ashare_identity_weekly --partition snapshot_date=YYYYMMDD --refresh
-uv run rdf datasets read ashare.company_profile --partition snapshot_date=YYYYMMDD --columns security_id exchange province city office employees main_business --limit 30
-uv run rdf datasets read ashare.name_changes --partition snapshot_date=YYYYMMDD --columns security_id name start_date end_date change_reason --limit 30
-uv run rdf datasets read ashare.sw_industry_classification --partition snapshot_date=YYYYMMDD --columns source_system index_id industry_name level industry_code parent_code --limit 30
-uv run rdf datasets read ashare.industry_members --partition snapshot_date=YYYYMMDD --limit 30
-uv run rdf datasets read ashare.ci_industry_members --partition snapshot_date=YYYYMMDD --limit 30
-uv run rdf maintain ashare-concept-members --snapshot-date YYYYMMDD --limit 20 --refresh
-uv run rdf datasets read ashare.concept_members --partition snapshot_date=YYYYMMDD --partition concept_id=CONCEPT_ID --limit 30
-uv run rdf maintain ashare-ths-concepts --snapshot-date YYYYMMDD --limit 20 --refresh
-uv run rdf datasets read ashare.ths_index --partition snapshot_date=YYYYMMDD --columns concept_id name index_type source_member_count --limit 30
-uv run rdf datasets read ashare.ths_concept_members --partition snapshot_date=YYYYMMDD --partition concept_id=CONCEPT_ID --limit 30
-uv run rdf ingest pipeline ashare_market_attention_daily --partition trade_date=YYYYMMDD --refresh
-uv run rdf datasets read ashare.ths_hot_rank --partition trade_date=YYYYMMDD --columns rank_type subject_id subject_name rank heat concept_tags_json --limit 30
-uv run rdf datasets read ashare.dc_hot_rank --partition trade_date=YYYYMMDD --columns rank_type security_id security_name rank pct_chg price --limit 30
-uv run rdf ingest pipeline ashare_short_term_sentiment_daily --partition trade_date=YYYYMMDD --refresh
-uv run rdf datasets read ashare.limit_step --partition trade_date=YYYYMMDD --columns security_id security_name limit_up_days --limit 30
-uv run rdf datasets read ashare.limit_concept_rank --partition trade_date=YYYYMMDD --columns concept_id concept_name rank limit_up_count consecutive_limit_count up_stat --limit 30
-uv run rdf datasets read ashare.kpl_limit_list --partition trade_date=YYYYMMDD --columns security_id security_name board_status theme_tags limit_reason limit_order turnover_rate --limit 30
-uv run rdf datasets read ashare.kpl_concept_members --partition trade_date=YYYYMMDD --columns concept_id concept_name security_id security_name hot_num vendor_exposure_desc --limit 30
-uv run rdf ingest pipeline ashare_moneyflow_daily --partition trade_date=YYYYMMDD --refresh
-uv run rdf datasets read ashare.moneyflow_dc --partition trade_date=YYYYMMDD --columns security_id security_name net_amount net_amount_rate buy_elg_amount buy_lg_amount --limit 30
-uv run rdf datasets read ashare.moneyflow_board_dc --partition trade_date=YYYYMMDD --columns board_type subject_id subject_name rank net_amount net_amount_rate --limit 30
-uv run rdf datasets read ashare.moneyflow_hsgt --partition trade_date=YYYYMMDD --columns north_money south_money hgt sgt --limit 30
-uv run rdf datasets read ashare.northbound_eligible --partition trade_date=YYYYMMDD --columns security_id security_name connect_type connect_type_name --limit 30
-uv run rdf datasets read ashare.hsgt_top10 --partition trade_date=YYYYMMDD --columns security_id name market_type rank amount net_amount buy sell --limit 30
-uv run rdf datasets read ashare.margin_detail --partition trade_date=YYYYMMDD --columns security_id name rzye rqye rzmre rzche rzrqye --limit 30
-uv run rdf ingest pipeline ashare_chips_on_demand --partition trade_date=YYYYMMDD --partition security_id=000001.SZ --refresh
-uv run rdf datasets read ashare.chip_distribution_perf --partition trade_date=YYYYMMDD --partition security_id=000001.SZ --columns security_id winner_rate cost_50pct cost_85pct cost_95pct weight_avg --limit 30
-uv run rdf datasets read ashare.chip_distribution_detail --partition trade_date=YYYYMMDD --partition security_id=000001.SZ --columns security_id price percent --limit 30
-uv run rdf ingest pipeline ashare_ownership_periodic --partition period=YYYYMMDD --refresh
-uv run rdf datasets read ashare.shareholder_count --partition period=YYYYMMDD --columns security_id ann_date holder_num --limit 30
-uv run rdf datasets read ashare.top10_holders --partition period=YYYYMMDD --columns security_id ann_date holder_name holder_type hold_amount hold_ratio hold_change --limit 30
-uv run rdf datasets read ashare.top10_float_holders --partition period=YYYYMMDD --columns security_id ann_date holder_name holder_type hold_amount hold_float_ratio hold_change --limit 30
-uv run rdf ingest pipeline ashare_share_pledge_weekly --partition end_date=YYYYMMDD --refresh
-uv run rdf datasets read ashare.share_pledge_stats --partition end_date=YYYYMMDD --columns security_id pledge_count unrest_pledge rest_pledge total_share pledge_ratio --limit 30
-uv run rdf ingest pipeline ashare_corporate_action_events_daily --partition ann_date=YYYYMMDD --refresh
-uv run rdf datasets read ashare.shareholder_trades --partition ann_date=YYYYMMDD --columns security_id holder_name holder_type in_de change_vol change_ratio after_share after_ratio avg_price --limit 30
-uv run rdf datasets read ashare.repurchase_events --partition ann_date=YYYYMMDD --columns security_id end_date process_status volume amount high_limit low_limit --limit 30
-uv run rdf ingest pipeline ashare_financial_event_daily --partition ann_date=YYYYMMDD --refresh
-uv run rdf datasets read ashare.earnings_forecast_events --partition ann_date=YYYYMMDD --columns security_id period forecast_type p_change_min p_change_max net_profit_min net_profit_max change_reason --limit 30
-uv run rdf ingest pipeline ashare_block_trades_daily --partition trade_date=YYYYMMDD --refresh
-uv run rdf datasets read ashare.block_trades --partition trade_date=YYYYMMDD --columns security_id price volume amount buyer seller --limit 30
-uv run rdf maintain ashare-main-business --period YYYYMMDD --stock-snapshot-date YYYYMMDD --limit 20 --refresh
-uv run rdf maintain ashare-main-business --period YYYYMMDD --security-id 000001.SZ --segment-types P,D --refresh
-uv run rdf datasets read ashare.main_business --partition period=YYYYMMDD --partition security_id=000001.SZ --partition segment_type=P --limit 30
-uv run rdf datasets scan ashare.main_business --partition period=YYYYMMDD --columns security_id segment_type item_name sales --limit 50
-uv run rdf maintain ashare-financials --as-of YYYYMMDD --stock-snapshot-date YYYYMMDD --dataset-id ashare.income_statement --limit 20 --refresh
-uv run rdf maintain ashare-financials --period YYYYMMDD --security-id 000001.SZ --dataset-id ashare.income_statement --refresh
-uv run rdf datasets read ashare.income_statement --partition period=YYYYMMDD --partition security_id=000001.SZ --limit 30
-uv run rdf datasets scan ashare.income_statement --partition period=YYYYMMDD --columns security_id period total_revenue n_income --limit 50
-uv run rdf datasets read ashare.announcements --partition publish_date=YYYYMMDD --limit 30
-uv run rdf announcements discover --start-date YYYYMMDD --end-date YYYYMMDD --security-id 000001.SZ --keyword 订单 --limit 20
-uv run rdf announcements search --as-of YYYYMMDD --lookback-days 7 --category 持股变动 --keyword 减持 --limit 30
-uv run rdf announcements fetch-text --publish-date YYYYMMDD --announcement-id ANNOUNCEMENT_ID --source-url SOURCE_URL --security-id 000001.SZ
-uv run rdf maintain industry-report-index --query-date YYYYMMDD --lookback-days 30 --max-pages 1 --refresh
-uv run rdf datasets read ashare.announcement_text --partition publish_date=YYYYMMDD --partition announcement_id=ANNOUNCEMENT_ID --columns announcement_id security_id title text_length parse_status --limit 30
-uv run rdf datasets scan ashare.announcement_text --partition publish_date=YYYYMMDD --columns announcement_id security_id title text_length parse_status --limit 50
-uv run rdf datasets read industry.eastmoney_report_index --partition query_date=YYYYMMDD --columns query_date report_id title published_at source_name industry_name source_url --limit 30
-uv run rdf evidence from-announcement-text --partition publish_date=YYYYMMDD --partition announcement_id=ANNOUNCEMENT_ID --query 关键词 --limit 20
-uv run rdf datasets read global.sec_ticker_cik --partition snapshot_date=YYYYMMDD --limit 30
-uv run rdf datasets read global.sec_companyfacts --partition cik=0000320193 --columns cik entity_name concept unit end_date filed_date form value --limit 30
-uv run rdf inventory features --as-of YYYYMMDD
-uv run rdf features meta ashare.daily_momentum --as-of YYYYMMDD --window N
-uv run rdf features read ashare.daily_momentum --as-of YYYYMMDD --window N --limit 30
-uv run rdf features read ashare.market_strength --as-of YYYYMMDD --window N --limit 30
-uv run rdf features read ashare.industry_strength --as-of YYYYMMDD --window N --limit 30
-uv run rdf features read ashare.concept_strength --as-of YYYYMMDD --window N --limit 30
-uv run rdf features read ashare.limit_sentiment --as-of YYYYMMDD --window N --limit 30
-uv run rdf evidence sources list
-uv run rdf evidence sources fetch SOURCE_ID --param key=value --limit 20
-uv run rdf evidence from-dataset global.sec_companyfacts --partition cik=0000320193 --limit 50
-uv run rdf evidence from-dataset ashare.shareholder_trades --partition ann_date=YYYYMMDD --limit 50
-uv run rdf evidence from-dataset ashare.repurchase_events --partition ann_date=YYYYMMDD --limit 50
-uv run rdf evidence from-dataset ashare.earnings_forecast_events --partition ann_date=YYYYMMDD --limit 50
-uv run rdf evidence profile --topic TOPIC --limit 20
-uv run rdf evidence source-candidates --min-records 3 --limit 20
-uv run rdf evidence list --industry INDUSTRY
-uv run rdf evidence export evidence-slice.jsonl --company 000001.SZ --period YYYYMMDD
-uv run rdf relations ingest relations.json
-uv run rdf relations profile --limit 20
-uv run rdf relations neighborhood --entity ENTITY --limit 50
-uv run rdf relations list --subject ENTITY
-uv run rdf relations snapshot --subject ENTITY --output relation-snapshot.json
+uv run rdf datasets search 关键词 --as-of YYYYMMDD
+uv run rdf datasets meta DATASET_ID --partition key=value
+uv run rdf datasets read DATASET_ID --partition key=value --limit 30
+uv run rdf quotes current --security-id 000001.SZ
+uv run rdf features read FEATURE_ID --as-of YYYYMMDD --window 20 --limit 30
 ```
 
 读取 inventory、source map 或 dataset search 时先看 `coverage.status`：`full` 才是目标分区完整覆盖，`partial` 是多键分区的局部子分区，`latest_before` 是目标日前最近快照，`latest` 是未指定 as-of 的本地最新。公司研究结论不能把 `partial/latest_before/latest` 当成目标日全量事实；`rdf inventory plan` 默认会把 `none/partial` 覆盖缺口纳入补数计划。

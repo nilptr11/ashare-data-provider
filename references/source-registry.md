@@ -2,12 +2,14 @@
 
 本文件告诉 LLM agent：本地数据不足时，应该优先从哪里补证据，以及补来的内容应该如何进入研究链路。它不是实时搜索清单，也不要求每次研究都联网。
 
+按研究问题选择来源时，先读 `references/fetch-playbook.md`；本文件负责补充来源权威等级、边界和入库规则。
+
 外部数据工具仓库的吸收边界见 `references/source-expansion-notes.md`。端点经验可以吸收，但必须重新注册到本项目的数据契约和 lineage 中。
 
 ## 使用原则
 
 1. 本地 mart、feature、evidence、relations 已覆盖的问题，优先使用本地数据。
-2. 数据缺失、过期、覆盖不足或需要公司/产业证据时，先确认外部来源的获取方法、参数、时间边界和可信度，再按研究问题缩小范围 fetch。
+2. 数据缺失、过期、覆盖不足或需要公司/产业证据时，先按 `references/fetch-playbook.md` 判断问题类型，再确认外部来源的获取方法、参数、时间边界和可信度，并按研究问题缩小范围 fetch。
 3. 外部来源不能覆盖本地已有的行情、公告、财务和资金事实；冲突时要标记冲突。按需外部查询结果不能伪装成某个日期或市场的全量本地分区。
 4. 补证据时记录来源名称、URL 或接口、发布时间、抓取时间、适用范围和不确定性。
 5. 高频且结构稳定的来源，应沉淀为可复用 evidence 来源；一次性材料只作为 evidence。
@@ -31,6 +33,7 @@
 | SEC EDGAR | `src/research_data_foundation/sources/sec_edgar.py` | 海外公司 filing、ticker-CIK 映射、XBRL companyfacts、跨市场参考和 relation/evidence seed | S1 强来源；需要规范 User-Agent；不进入 A 股主候选池 |
 | Eastmoney Direct | `src/research_data_foundation/sources/eastmoney.py` | 行业研报索引和部分东财独有公开数据 | S3/S4 线索来源；`industry-report-index` 按 `query_date` 限定结束日期，研报索引不能证明公司业务暴露 |
 | Eastmoney Intraday | `src/research_data_foundation/sources/eastmoney.py` | A 股盘中行情 snapshot | provisional 观察源，不能覆盖 Tushare EOD |
+| Tencent Quote | `src/research_data_foundation/sources/tencent.py`, `rdf quotes current` | A 股当前行情按需观察 | S3 provisional 来源；优先用于今日未收盘或 Tushare EOD 未更新时的当前 quote，不写入 `ashare.daily`，不能单独生成主候选 |
 | 通用 HTTP | `src/research_data_foundation/sources/http.py` | 后续政策、协会、公告、价格和招投标来源的 transport | 优先登记获取方法和字段语义；需要长期本地化时再声明 SourceSpec、DatasetContract 和 IngestionRecipe |
 | 可复用 evidence source | `data/evidence/sources/*.json`, `rdf evidence sources` | 官方统计、协会、价格指数、招投标等结构稳定 HTTP JSON 补证入口 | 默认先作为获取说明；只有当次研究用到的结果才 fetch 并进入 evidence，不能替代 mart 或官方公告正文 claim |
 | 待迁移：CNINFO / 交易所 / 招投标 | `references/refactor-plan.md` | 公司公告、订单、项目、中标、客户线索 | 应进入 evidence 或 mart；公司事实优先使用 S1 来源 |
@@ -64,7 +67,7 @@
 - 数据集型来源：优先变成 connector 并发布为 mart。
 - 一次性网页或 PDF：只作为 evidence，并保留摘要、原始链接和抓取时间。
 
-常用命令：
+常用补证命令：
 
 ```bash
 uv run rdf evidence sources list
@@ -77,7 +80,7 @@ uv run rdf evidence profile --topic TOPIC --limit 20
 uv run rdf evidence source-candidates --min-records 3 --limit 20
 ```
 
-`evidence-source.json` 必须包含来源类型、来源名、URL、topic、claim 模板或 claim 字段映射、发布日期字段或固定发布日期、字段映射、置信度和 verification。可复用 source 的输出仍需经过 evidence 证据纪律；默认先用 `--dry-run` 预览映射，只 fetch 当次研究需要的结果。如果后续要参与 feature、候选生成或长期结构化分析，应升级为正式数据集注册。
+`evidence-source.json` 必须包含来源类型、来源名、URL、topic、claim 模板或 claim 字段映射、发布日期字段或固定发布日期、字段映射、置信度和 verification。可复用 source 的输出仍需经过 evidence 证据纪律；默认先用 `--dry-run` 预览映射，只 fetch 当次研究需要的结果。如果后续要参与 feature、候选生成或长期结构化分析，应升级为正式数据集注册。更多底层命令见 `references/cli-cookbook.md`。
 `source-candidates` 只是根据未绑定 `dataset_id` 的已入库外部 evidence 识别高频数值组，不能自动生成 source spec；保存为 reusable source 前仍要确认权威 URL、字段映射、发布时间字段、claim 模板和适用边界。已经由 mart 派生的 evidence 应优先回到正式 dataset / recipe，而不是再注册为 evidence source。
 
 ## 公司补证规则

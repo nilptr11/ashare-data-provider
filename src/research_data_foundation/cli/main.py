@@ -40,7 +40,7 @@ from ..maintenance import (
 )
 from ..relations import ENTITY_TYPES, PREDICATES, RelationProfiler, RelationRecord, RelationStore, validate_relation
 from ..runs import RunRecorder, replay_run
-from ..sources import CninfoSourceAdapter
+from ..sources import CninfoSourceAdapter, EastmoneySourceAdapter, SourceAdapterError, TencentQuoteAdapter
 from ..storage import MartStore
 
 
@@ -102,6 +102,15 @@ def main(argv: list[str] | None = None) -> int:
                 domain=args.domain,
                 use=args.use,
                 limit_datasets=args.limit_datasets,
+            )
+            print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+            return 0
+    if args.command == "quotes":
+        if args.quotes_command == "current":
+            payload = current_quote_payload(
+                MartStore(args.data_dir, registry),
+                security_ids=tuple(args.security_id),
+                source=args.source,
             )
             print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
             return 0
@@ -766,6 +775,17 @@ def build_parser() -> argparse.ArgumentParser:
     datasets_read_window.add_argument("--columns", nargs="+")
     datasets_read_window.add_argument("--limit", type=int, default=20)
 
+    quotes = subparsers.add_parser("quotes", help="Fetch on-demand quote context without updating canonical EOD data")
+    quotes_subparsers = quotes.add_subparsers(dest="quotes_command", required=True)
+    quotes_current = quotes_subparsers.add_parser("current", help="Fetch provisional current A-share quotes")
+    quotes_current.add_argument("--security-id", action="append", required=True, help="A-share security id, e.g. 000001.SZ. Repeatable.")
+    quotes_current.add_argument(
+        "--source",
+        choices=("auto", "tencent", "tencent_quote", "eastmoney", "eastmoney_intraday"),
+        default="auto",
+        help="Quote source. auto tries Tencent first, then Eastmoney.",
+    )
+
     announcements = subparsers.add_parser("announcements", help="Discover and fetch official announcements on demand")
     announcements_subparsers = announcements.add_subparsers(dest="announcements_command", required=True)
     announcements_discover = announcements_subparsers.add_parser("discover", help="Query CNINFO remotely for announcement candidates without writing local mart data")
@@ -1132,6 +1152,179 @@ def source_detail_payload(
         },
         "source": payload,
     }
+
+
+def current_quote_payload(
+    mart_store: MartStore,
+    *,
+    security_ids: tuple[str, ...],
+    source: str,
+) -> dict[str, Any]:
+    source_order = quote_source_order(source)
+    attempts: list[dict[str, Any]] = []
+    selected_source = ""
+    records: list[dict[str, Any]] = []
+    for source_id in source_order:
+        try:
+            records = fetch_current_quote_records(source_id, security_ids)
+            attempts.append({"source_id": source_id, "rows": len(records), "error": ""})
+        except SourceAdapterError as error:
+            attempts.append({"source_id": source_id, "rows": 0, "error": str(error)})
+            if source != "auto":
+                raise SystemExit(str(error)) from error
+            continue
+        selected_source = source_id
+        if records or source != "auto":
+            break
+    status = "ready" if records else "empty"
+    if not selected_source and attempts:
+        selected_source = str(attempts[-1]["source_id"])
+        status = "unavailable"
+    return {
+        "schema": "rdf.current_quote.v1",
+        "status": status,
+        "requested_security_ids": list(security_ids),
+        "source": selected_source,
+        "attempts": attempts,
+        "canonical_eod": canonical_eod_context(mart_store),
+        "current_quote": {
+            "finality": "provisional",
+            "available_after": "realtime",
+            "allowed_uses": ["market_context", "market_validation"],
+            "forbidden_uses": ["candidate_generation", "company_business_exposure", "trade_execution"],
+            "records": records,
+        },
+        "boundary": (
+            "Current quotes are provisional observations. Use them to understand the current market state before "
+            "Tushare EOD is available, but do not overwrite ashare.daily or use them alone for primary candidates."
+        ),
+    }
+
+
+def quote_source_order(source: str) -> tuple[str, ...]:
+    normalized = {"tencent": "tencent_quote", "eastmoney": "eastmoney_intraday"}.get(source, source)
+    if normalized == "auto":
+        return ("tencent_quote", "eastmoney_intraday")
+    if normalized not in {"tencent_quote", "eastmoney_intraday"}:
+        raise SystemExit(f"unsupported quote source: {source}")
+    return (normalized,)
+
+
+def fetch_current_quote_records(source_id: str, security_ids: tuple[str, ...]) -> list[dict[str, Any]]:
+    if source_id == "tencent_quote":
+        result = TencentQuoteAdapter().fetch(
+            "qt.quote_snapshot",
+            {"security_ids": ",".join(security_ids)},
+        )
+        return [normalize_current_quote_record(row) for row in result.frame.to_dict(orient="records")]
+    if source_id == "eastmoney_intraday":
+        normalized_security_ids = [normalize_ashare_security_id(value) for value in security_ids]
+        result = EastmoneySourceAdapter(source_id="eastmoney_intraday").fetch(
+            "push2.quote_snapshot",
+            {"secids": ",".join(security_id_to_eastmoney_secid(value) for value in normalized_security_ids)},
+        )
+        code_lookup = {value.split(".", 1)[0]: value for value in normalized_security_ids}
+        return [
+            normalize_eastmoney_quote_record(row, code_lookup=code_lookup)
+            for row in result.frame.to_dict(orient="records")
+        ]
+    raise SourceAdapterError(f"unsupported quote source: {source_id}")
+
+
+def normalize_current_quote_record(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "security_id": str(row.get("security_id") or ""),
+        "name": str(row.get("name") or ""),
+        "snapshot_at": str(row.get("snapshot_at") or ""),
+        "quote_time": str(row.get("quote_time") or ""),
+        "price": row.get("price"),
+        "pct_chg": row.get("pct_chg"),
+        "change": row.get("change"),
+        "open": row.get("open"),
+        "high": row.get("high"),
+        "low": row.get("low"),
+        "prev_close": row.get("prev_close"),
+        "volume": row.get("volume"),
+        "amount": row.get("amount"),
+        "quote_source": str(row.get("quote_source") or "tencent_quote"),
+        "source_url": str(row.get("source_url") or ""),
+    }
+
+
+def normalize_eastmoney_quote_record(row: dict[str, Any], *, code_lookup: dict[str, str]) -> dict[str, Any]:
+    code = str(row.get("f12") or row.get("security_id") or "")
+    return {
+        "security_id": code_lookup.get(code, normalize_ashare_security_id(code)),
+        "name": str(row.get("f14") or row.get("name") or ""),
+        "snapshot_at": str(row.get("snapshot_at") or ""),
+        "quote_time": "",
+        "price": to_float(row.get("f2") if "f2" in row else row.get("price")),
+        "pct_chg": to_float(row.get("f3") if "f3" in row else row.get("pct_chg")),
+        "change": None,
+        "open": None,
+        "high": None,
+        "low": None,
+        "prev_close": None,
+        "volume": to_float(row.get("f5") if "f5" in row else row.get("volume")),
+        "amount": to_float(row.get("f6") if "f6" in row else row.get("amount")),
+        "quote_source": "eastmoney_intraday",
+        "source_url": str(row.get("source_url") or ""),
+    }
+
+
+def canonical_eod_context(mart_store: MartStore) -> dict[str, Any]:
+    try:
+        partitions = mart_store.list_partitions("ashare.daily")
+    except Exception:
+        partitions = []
+    latest = max((partition.get("trade_date", "") for partition in partitions), default="")
+    return {
+        "dataset_id": "ashare.daily",
+        "latest_trade_date": latest,
+        "finality": "final",
+        "available_after": "post_close",
+        "read_command": (
+            f"uv run rdf datasets read ashare.daily --partition trade_date={latest} --limit 30"
+            if latest
+            else "uv run rdf inventory plan --as-of YYYYMMDD"
+        ),
+        "boundary": "Tushare-maintained canonical EOD fact. It is stable after close, but not a realtime quote source.",
+    }
+
+
+def normalize_ashare_security_id(value: str) -> str:
+    text = str(value).strip().upper()
+    if "." in text:
+        code, exchange = text.split(".", 1)
+        if exchange in {"SH", "SZ", "BJ"}:
+            return f"{code}.{exchange}"
+    if len(text) == 6 and text.isdigit():
+        if text.startswith(("6", "5", "9")):
+            return f"{text}.SH"
+        if text.startswith(("0", "2", "3")):
+            return f"{text}.SZ"
+        if text.startswith(("4", "8")):
+            return f"{text}.BJ"
+    raise SourceAdapterError(f"unsupported A-share security id: {value}")
+
+
+def security_id_to_eastmoney_secid(value: str) -> str:
+    security_id = normalize_ashare_security_id(value)
+    code, exchange = security_id.split(".", 1)
+    market = "1" if exchange == "SH" else "0"
+    return f"{market}.{code}"
+
+
+def to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == "-":
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
 def source_summary(
@@ -1813,7 +2006,10 @@ DATASET_SEARCH_ALIASES: dict[str, tuple[str, ...]] = {
     "美股": ("global", "sec", "ticker_cik", "companyfacts"),
     "sec": ("sec", "filings", "companyfacts", "ticker_cik"),
     "盘中": ("intraday", "snapshot", "provisional"),
+    "当前行情": ("intraday", "snapshot", "provisional"),
+    "当前": ("intraday", "snapshot", "provisional"),
     "实时": ("intraday", "snapshot", "provisional"),
+    "实时行情": ("intraday", "snapshot", "provisional"),
 }
 
 
